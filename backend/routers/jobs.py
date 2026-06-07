@@ -2,9 +2,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from typing import Optional
 import io
-import ssl
-import urllib.request
-from datetime import datetime
+import os
+from datetime import datetime, date
 
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -24,12 +23,9 @@ from calculations import calculate_job
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
-# ── Logo (downloaded once, cached in memory) ──────────────────────────────────
+# ── Logo (transparent PNG bundled with the backend, cached in memory) ─────────
 
-LOGO_URL = (
-    "https://encrypted-tbn0.gstatic.com/images"
-    "?q=tbn:ANd9GcRTdaDS48M9wuMBtTT-qCLFNbVV1nI9iWstHPEqdQaIaQ&s"
-)
+LOGO_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "logo.png")
 _logo_bytes: Optional[bytes] = None
 _logo_loaded = False
 
@@ -40,15 +36,8 @@ def _get_logo() -> Optional[bytes]:
         return _logo_bytes
     _logo_loaded = True
     try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request(
-            LOGO_URL,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-        )
-        with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
-            _logo_bytes = resp.read()
+        with open(LOGO_PATH, "rb") as f:
+            _logo_bytes = f.read()
     except Exception:
         _logo_bytes = None
     return _logo_bytes
@@ -95,18 +84,41 @@ def _fmt_box(job: dict) -> str:
     return "×".join(parts) if parts else "—"
 
 
-def _fetch_jobs(search: Optional[str], sort_by: Optional[str]) -> list[dict]:
+def _parse_date(label: str, value: Optional[str]) -> Optional[date]:
+    """Parse a 'YYYY-MM-DD' query param, raising 400 on bad input."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid {label}: expected YYYY-MM-DD")
+
+
+def _fetch_jobs(
+    search: Optional[str],
+    sort_by: Optional[str],
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+) -> list[dict]:
     order_clause = _SORT_MAP.get(sort_by or "newest", "created_at DESC")
     conn = get_connection()
     cur  = dict_cursor(conn)
+
+    conditions: list[str] = []
+    params: list = []
+
     if search:
-        s = f"%{search}%"
-        cur.execute(
-            f"SELECT * FROM jobs WHERE {_SEARCH_FILTER} ORDER BY {order_clause}",
-            [s] * 15,
-        )
-    else:
-        cur.execute(f"SELECT * FROM jobs ORDER BY {order_clause}")
+        conditions.append(f"({_SEARCH_FILTER})")
+        params.extend([f"%{search}%"] * 15)
+
+    if from_date and to_date:
+        # Filter on the existing created_at field, by calendar day.
+        conditions.append("created_at::date BETWEEN %s AND %s")
+        params.extend([from_date, to_date])
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    cur.execute(f"SELECT * FROM jobs {where_clause} ORDER BY {order_clause}", params)
+
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows
@@ -140,8 +152,12 @@ def get_companies():
 # ── Export endpoints (must come before /{job_id}) ─────────────────────────────
 
 @router.get("/export/excel")
-def export_excel(search: Optional[str] = Query(None)):
-    rows = _fetch_jobs(search, "newest")
+def export_excel(
+    search: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None, description="YYYY-MM-DD — start of created_at range"),
+    to_date: Optional[str] = Query(None, description="YYYY-MM-DD — end of created_at range"),
+):
+    rows = _fetch_jobs(search, "newest", _parse_date("from_date", from_date), _parse_date("to_date", to_date))
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -244,8 +260,12 @@ def export_excel(search: Optional[str] = Query(None)):
 
 
 @router.get("/export/pdf")
-def export_pdf(search: Optional[str] = Query(None)):
-    rows = _fetch_jobs(search, "newest")
+def export_pdf(
+    search: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None, description="YYYY-MM-DD — start of created_at range"),
+    to_date: Optional[str] = Query(None, description="YYYY-MM-DD — end of created_at range"),
+):
+    rows = _fetch_jobs(search, "newest", _parse_date("from_date", from_date), _parse_date("to_date", to_date))
 
     out = io.BytesIO()
     doc = SimpleDocTemplate(

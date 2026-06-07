@@ -1,5 +1,8 @@
 'use client';
+import { useState } from 'react';
 import { jobsApi } from '@/lib/api';
+import { ExportRange } from '@/types';
+import ExportRangeModal from './ExportRangeModal';
 
 interface Props {
   search: string;
@@ -7,10 +10,18 @@ interface Props {
 }
 
 export default function ExportButtons({ search, totalFiltered }: Props) {
+  const [pending, setPending] = useState<'excel' | 'pdf' | null>(null);
+
   const download = (url: string) => {
     const a = document.createElement('a');
     a.href = url;
     a.click();
+  };
+
+  const handleConfirm = (range: ExportRange) => {
+    if (pending === 'excel') download(jobsApi.excelUrl(search || undefined, range));
+    if (pending === 'pdf') download(jobsApi.pdfUrl(search || undefined, range));
+    setPending(null);
   };
 
   return (
@@ -19,7 +30,7 @@ export default function ExportButtons({ search, totalFiltered }: Props) {
         {search ? `Export ${totalFiltered} filtered` : `Export all ${totalFiltered}`}:
       </span>
       <button
-        onClick={() => download(jobsApi.excelUrl(search || undefined))}
+        onClick={() => setPending('excel')}
         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors shadow-sm"
         style={{ background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.3)' }}
         onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(52,211,153,0.25)'; }}
@@ -32,7 +43,7 @@ export default function ExportButtons({ search, totalFiltered }: Props) {
         Excel
       </button>
       <button
-        onClick={() => download(jobsApi.pdfUrl(search || undefined))}
+        onClick={() => setPending('pdf')}
         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors shadow-sm"
         style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}
         onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(248,113,113,0.25)'; }}
@@ -44,6 +55,14 @@ export default function ExportButtons({ search, totalFiltered }: Props) {
         </svg>
         PDF
       </button>
+
+      {pending && (
+        <ExportRangeModal
+          kind={pending}
+          onConfirm={handleConfirm}
+          onCancel={() => setPending(null)}
+        />
+      )}
     </div>
   );
 }

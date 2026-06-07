@@ -136,15 +136,14 @@ export default function HomePage() {
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             {/* Company logo */}
-            <div className="shrink-0 rounded-xl overflow-hidden shadow-md" style={{ width: 44, height: 44 }}>
+            <div className="shrink-0" style={{ width: 44, height: 44 }}>
               <Image
-                src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRTdaDS48M9wuMBtTT-qCLFNbVV1nI9iWstHPEqdQaIaQ&s"
+                src="/logo.png"
                 alt="Shri Neminath Printers & Packaging"
                 width={44}
                 height={44}
                 style={{ objectFit: 'contain', width: '100%', height: '100%' }}
                 priority
-                unoptimized
               />
             </div>
             <div className="min-w-0">

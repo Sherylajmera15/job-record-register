@@ -65,6 +65,13 @@ export type SortOption =
   | 'sheets'
   | 'kg';
 
+export type ExportRangeOption = 'today' | 'this_week' | 'this_month' | 'all_time' | 'custom';
+
+export interface ExportRange {
+  from?: string; // YYYY-MM-DD, omitted for "all_time"
+  to?: string;   // YYYY-MM-DD, omitted for "all_time"
+}
+
 export type ToastKind = 'success' | 'error' | 'info';
 
 export interface ToastMsg {
