@@ -9,6 +9,9 @@ interface Props {
   onSortChange: (s: SortOption) => void;
   onEdit: (job: Job) => void;
   onDelete: (job: Job) => void;
+  selectedIds?: Set<number>;
+  onToggleSelect?: (id: number) => void;
+  onToggleSelectAll?: () => void;
 }
 
 const COL_SORT: { label: string; key?: SortOption }[] = [
@@ -39,7 +42,7 @@ function formatBox(job: Job): string {
   return parts.length > 0 ? parts.join('×') : '—';
 }
 
-export default function JobTable({ jobs, loading, sortBy, onSortChange, onEdit, onDelete }: Props) {
+export default function JobTable({ jobs, loading, sortBy, onSortChange, onEdit, onDelete, selectedIds, onToggleSelect, onToggleSelectAll }: Props) {
   const toggleSort = (key?: SortOption) => {
     if (!key) return;
     if (key === 'newest') {
@@ -95,6 +98,18 @@ export default function JobTable({ jobs, loading, sortBy, onSortChange, onEdit, 
       <table className="sticky-table w-full border-collapse text-sm">
         <thead>
           <tr>
+            {onToggleSelect && (
+              <th className="px-3 py-3 text-center w-10">
+                <input
+                  type="checkbox"
+                  checked={jobs.length > 0 && selectedIds?.size === jobs.length}
+                  onChange={onToggleSelectAll}
+                  className="cursor-pointer"
+                  style={{ accentColor: '#00ccf0', width: 14, height: 14 }}
+                  title="Select all"
+                />
+              </th>
+            )}
             {COL_SORT.map(({ label, key }) => (
               <th
                 key={label}
@@ -116,13 +131,25 @@ export default function JobTable({ jobs, loading, sortBy, onSortChange, onEdit, 
             <tr
               key={job.id}
               style={{
-                background: i % 2 === 0 ? '#0d1228' : '#0a0f20',
+                background: selectedIds?.has(job.id) ? 'rgba(0,204,240,0.06)' : (i % 2 === 0 ? '#0d1228' : '#0a0f20'),
                 borderBottom: '1px solid #1e2d50',
                 transition: 'background 0.1s',
               }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#141c35'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = i % 2 === 0 ? '#0d1228' : '#0a0f20'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = selectedIds?.has(job.id) ? 'rgba(0,204,240,0.06)' : (i % 2 === 0 ? '#0d1228' : '#0a0f20'); }}
             >
+              {/* Checkbox */}
+              {onToggleSelect && (
+                <td className="px-3 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds?.has(job.id) ?? false}
+                    onChange={() => onToggleSelect(job.id)}
+                    className="cursor-pointer"
+                    style={{ accentColor: '#00ccf0', width: 14, height: 14 }}
+                  />
+                </td>
+              )}
               {/* Date */}
               <td className="px-4 py-3 whitespace-nowrap">
                 <div className="text-xs font-medium" style={{ color: '#e2e8f0' }}>{formatDate(job.created_at)}</div>

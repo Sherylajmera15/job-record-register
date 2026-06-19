@@ -1,14 +1,16 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
-import { Job, JobCreate, DualDashboardStats, SortOption, ToastMsg } from '@/types';
-import { jobsApi, dashboardApi } from '@/lib/api';
+import { Job, JobCreate, DualDashboardStats, SortOption, ToastMsg, PartialEntry, PartialEntryCreate } from '@/types';
+import { jobsApi, dashboardApi, partialApi } from '@/lib/api';
 import Dashboard from '@/components/Dashboard';
 import JobForm from '@/components/JobForm';
 import JobTable from '@/components/JobTable';
 import SearchSort from '@/components/SearchSort';
 import ExportButtons from '@/components/ExportButtons';
 import DeleteConfirmModal from '@/components/DeleteConfirmModal';
+import PartialEntriesSection from '@/components/PartialEntriesSection';
+import SupplierExportModal from '@/components/SupplierExportModal';
 import Toast from '@/components/Toast';
 
 export default function HomePage() {
@@ -24,8 +26,15 @@ export default function HomePage() {
   const [editJob, setEditJob] = useState<Job | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Job | null>(null);
 
-  const [toasts, setToasts] = useState<ToastMsg[]>([]);
+  // Supplier export selection
+  const [selectedJobIds, setSelectedJobIds] = useState<Set<number>>(new Set());
+  const [showSupplierModal, setShowSupplierModal] = useState(false);
 
+  // Partial entries
+  const [completingPartialId, setCompletingPartialId] = useState<number | null>(null);
+  const [partialsRefreshKey, setPartialsRefreshKey] = useState(0);
+
+  const [toasts, setToasts] = useState<ToastMsg[]>([]);
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
 
   const toast = useCallback((text: string, kind: ToastMsg['kind'] = 'success') => {
@@ -81,7 +90,12 @@ export default function HomePage() {
 
   const handleSave = async (data: JobCreate) => {
     try {
-      if (editJob) {
+      if (completingPartialId !== null) {
+        await partialApi.complete(completingPartialId, data);
+        toast('Entry completed and added to Job Records.');
+        setCompletingPartialId(null);
+        setPartialsRefreshKey(k => k + 1);
+      } else if (editJob) {
         await jobsApi.update(editJob.id, data);
         toast(`Job "${data.job_name}" updated successfully.`);
       } else {
@@ -98,7 +112,21 @@ export default function HomePage() {
     }
   };
 
+  const handleSavePartial = async (data: PartialEntryCreate) => {
+    try {
+      await partialApi.create(data);
+      toast('Draft saved to Partial Entries.', 'success');
+      setShowForm(false);
+      setEditJob(null);
+      setPartialsRefreshKey(k => k + 1);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast(msg || 'Failed to save draft.', 'error');
+    }
+  };
+
   const handleEdit = (job: Job) => {
+    setCompletingPartialId(null);
     setEditJob(job);
     setShowForm(true);
   };
@@ -109,6 +137,11 @@ export default function HomePage() {
       await jobsApi.remove(deleteTarget.id);
       toast(`Job "${deleteTarget.job_name}" deleted.`);
       setDeleteTarget(null);
+      setSelectedJobIds(prev => {
+        const next = new Set(prev);
+        next.delete(deleteTarget.id);
+        return next;
+      });
       await fetchJobs();
       await fetchStats();
     } catch {
@@ -116,15 +149,61 @@ export default function HomePage() {
     }
   };
 
+  const handleOpenCompletePartial = useCallback((partial: PartialEntry) => {
+    setCompletingPartialId(partial.id);
+    setEditJob({
+      id: -1,
+      customer_name: partial.customer_name ?? '',
+      job_name: partial.job_name ?? '',
+      artworks: partial.artworks ?? '',
+      length: partial.length ?? null,
+      width: partial.width ?? null,
+      height: partial.height ?? null,
+      gsm: partial.gsm ?? 0,
+      paper_quality: partial.paper_quality ?? '',
+      order_quantity: partial.order_quantity ?? 0,
+      sheet_length: partial.sheet_length ?? 0,
+      sheet_width: partial.sheet_width ?? 0,
+      ups: partial.ups ?? 0,
+      base_sheets: 0,
+      wastage_percentage: 0,
+      final_sheets: 0,
+      total_kg: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    setShowForm(true);
+  }, []);
+
   const openCreate = () => {
     setEditJob(null);
+    setCompletingPartialId(null);
     setShowForm(true);
   };
 
   const closeForm = () => {
     setShowForm(false);
     setEditJob(null);
+    setCompletingPartialId(null);
   };
+
+  const handleToggleSelect = useCallback((id: number) => {
+    setSelectedJobIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleToggleSelectAll = useCallback(() => {
+    setSelectedJobIds(prev => {
+      if (prev.size === jobs.length && jobs.length > 0) return new Set<number>();
+      return new Set(jobs.map(j => j.id));
+    });
+  }, [jobs]);
+
+  const formMode = completingPartialId !== null ? 'complete' : editJob ? 'edit' : 'create';
 
   return (
     <div className="min-h-screen" style={{ background: '#06091a' }}>
@@ -135,7 +214,6 @@ export default function HomePage() {
       >
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            {/* Company logo */}
             <div className="shrink-0" style={{ width: 44, height: 44 }}>
               <Image
                 src="/logo.png"
@@ -171,14 +249,13 @@ export default function HomePage() {
       {/* Main Content */}
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-6">
 
-        {/* Dashboard */}
         <Dashboard stats={stats} loading={loadingStats} />
 
         {/* Controls bar */}
         <div className="card p-4 mb-4">
           <div className="flex flex-col gap-3">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <h2 className="text-base font-bold text-white">Job Records</h2>
                 {!loadingJobs && (
                   <span
@@ -188,8 +265,33 @@ export default function HomePage() {
                     {jobs.length}
                   </span>
                 )}
+                {selectedJobIds.size > 0 && (
+                  <span
+                    className="text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={{ background: 'rgba(224,64,251,0.15)', color: '#e040fb', border: '1px solid rgba(224,64,251,0.3)' }}
+                  >
+                    {selectedJobIds.size} selected
+                  </span>
+                )}
               </div>
-              <ExportButtons search={search} totalFiltered={jobs.length} />
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedJobIds.size > 0 && (
+                  <button
+                    onClick={() => setShowSupplierModal(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors shadow-sm"
+                    style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(251,191,36,0.25)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(251,191,36,0.15)'; }}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Export to Supplier ({selectedJobIds.size})
+                  </button>
+                )}
+                <ExportButtons search={search} totalFiltered={jobs.length} />
+              </div>
             </div>
             <SearchSort
               search={search}
@@ -200,7 +302,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Table */}
+        {/* Job Table */}
         <JobTable
           jobs={jobs}
           loading={loadingJobs}
@@ -208,20 +310,38 @@ export default function HomePage() {
           onSortChange={handleSortChange}
           onEdit={handleEdit}
           onDelete={setDeleteTarget}
+          selectedIds={selectedJobIds}
+          onToggleSelect={handleToggleSelect}
+          onToggleSelectAll={handleToggleSelectAll}
         />
 
         {/* Record count footer */}
         {!loadingJobs && jobs.length > 0 && (
-          <p className="text-center text-xs mt-4 pb-6" style={{ color: '#3d5070' }}>
+          <p className="text-center text-xs mt-4" style={{ color: '#3d5070' }}>
             Showing {jobs.length} record{jobs.length !== 1 ? 's' : ''}
             {search ? ` matching "${search}"` : ''}
+            {selectedJobIds.size > 0 ? ` · ${selectedJobIds.size} selected for supplier export` : ''}
           </p>
         )}
+
+        {/* Partial Entries Section */}
+        <PartialEntriesSection
+          onComplete={handleOpenCompletePartial}
+          refreshKey={partialsRefreshKey}
+        />
+
+        <div className="pb-6" />
       </main>
 
       {/* Job Form Drawer */}
       {showForm && (
-        <JobForm editJob={editJob} onSave={handleSave} onClose={closeForm} />
+        <JobForm
+          editJob={editJob}
+          mode={formMode}
+          onSave={handleSave}
+          onSavePartial={formMode === 'create' ? handleSavePartial : undefined}
+          onClose={closeForm}
+        />
       )}
 
       {/* Delete Modal */}
@@ -233,7 +353,14 @@ export default function HomePage() {
         />
       )}
 
-      {/* Toast notifications */}
+      {/* Supplier Export Modal */}
+      {showSupplierModal && (
+        <SupplierExportModal
+          selectedIds={Array.from(selectedJobIds)}
+          onClose={() => setShowSupplierModal(false)}
+        />
+      )}
+
       <Toast toasts={toasts} onRemove={removeToast} />
     </div>
   );

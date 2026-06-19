@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import init_db
-from routers import jobs, dashboard
+from routers import jobs, dashboard, partials
 print("RUNNING FROM:", __file__)
 app = FastAPI(
     title="Shri Neminath Printers & Packaging — Job Record Register API",
@@ -34,6 +34,7 @@ def startup_event():
 
 app.include_router(jobs.router)
 app.include_router(dashboard.router)
+app.include_router(partials.router)
 
 
 @app.get("/api/health")

@@ -149,6 +149,18 @@ def get_companies():
     return [r[0] for r in rows]
 
 
+# ── GSM autocomplete (distinct values from completed jobs) ────────────────────
+
+@router.get("/gsm-values", response_model=list[int])
+def get_gsm_values():
+    conn = get_connection()
+    cur  = conn.cursor()
+    cur.execute("SELECT DISTINCT gsm FROM jobs WHERE gsm IS NOT NULL ORDER BY gsm")
+    rows = cur.fetchall()
+    conn.close()
+    return [r[0] for r in rows]
+
+
 # ── Export endpoints (must come before /{job_id}) ─────────────────────────────
 
 @router.get("/export/excel")
@@ -353,6 +365,212 @@ def export_pdf(
     out.seek(0)
 
     fname = f"job_records_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    return StreamingResponse(
+        out,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+# ── Supplier export helpers ───────────────────────────────────────────────────
+
+def _fetch_jobs_by_ids(job_ids: list[int]) -> list[dict]:
+    if not job_ids:
+        return []
+    conn = get_connection()
+    cur  = dict_cursor(conn)
+    placeholders = ",".join(["%s"] * len(job_ids))
+    cur.execute(
+        f"SELECT * FROM jobs WHERE id IN ({placeholders}) ORDER BY created_at DESC",
+        job_ids,
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+@router.get("/export/supplier/excel")
+def export_supplier_excel(ids: str = Query(..., description="Comma-separated job IDs")):
+    try:
+        job_ids = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid job IDs.")
+    if not job_ids:
+        raise HTTPException(status_code=400, detail="No valid job IDs provided.")
+
+    rows = _fetch_jobs_by_ids(job_ids)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Supplier Sheet"
+
+    thin   = Side(style="thin", color="CBD5E1")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    logo_bytes      = _get_logo()
+    logo_row_offset = 0
+    if logo_bytes:
+        try:
+            img        = XLImage(io.BytesIO(logo_bytes))
+            img.width  = 100
+            img.height = 50
+            ws.add_image(img, "A1")
+            ws.row_dimensions[1].height = 30
+            ws.row_dimensions[2].height = 26
+            logo_row_offset = 2
+        except Exception:
+            logo_row_offset = 0
+
+    title_row  = logo_row_offset + 1
+    sub_row    = logo_row_offset + 2
+    hdr_row    = logo_row_offset + 3
+    data_start = hdr_row + 1
+
+    last_col = get_column_letter(7)
+    ws.merge_cells(f"A{title_row}:{last_col}{title_row}")
+    tc           = ws.cell(row=title_row, column=1)
+    tc.value     = "Shri Neminath Printers & Packaging — Supplier Paper Requirement Sheet"
+    tc.font      = Font(bold=True, size=12, color="FFFFFF")
+    tc.fill      = PatternFill("solid", fgColor="0F172A")
+    tc.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[title_row].height = 28
+
+    ws.merge_cells(f"A{sub_row}:{last_col}{sub_row}")
+    sc           = ws.cell(row=sub_row, column=1)
+    sc.value     = f"Generated: {datetime.now().strftime('%d/%m/%Y %H:%M')}  |  Records: {len(rows)}"
+    sc.font      = Font(size=9, color="94A3B8")
+    sc.fill      = PatternFill("solid", fgColor="0F172A")
+    sc.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[sub_row].height = 18
+
+    headers   = ["#", "Paper Quality", "GSM", "Sheet Length (cm)", "Sheet Width (cm)", "Final Sheets", "Total KG"]
+    hdr_font  = Font(bold=True, color="FFFFFF", size=10)
+    hdr_fill  = PatternFill("solid", fgColor="1E40AF")
+    hdr_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for col, h in enumerate(headers, 1):
+        c           = ws.cell(row=hdr_row, column=col, value=h)
+        c.font      = hdr_font
+        c.fill      = hdr_fill
+        c.alignment = hdr_align
+        c.border    = border
+    ws.row_dimensions[hdr_row].height = 32
+
+    alt_fill = PatternFill("solid", fgColor="EFF6FF")
+    for i, job in enumerate(rows):
+        ri   = data_start + i
+        fill = alt_fill if ri % 2 == 0 else None
+        vals = [i + 1, job["paper_quality"], job["gsm"], job["sheet_length"], job["sheet_width"], job["final_sheets"], job["total_kg"]]
+        for col, v in enumerate(vals, 1):
+            c           = ws.cell(row=ri, column=col, value=v)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.border    = border
+            if fill:
+                c.fill = fill
+
+    for ci, w in enumerate([5, 22, 9, 18, 18, 16, 12], 1):
+        ws.column_dimensions[get_column_letter(ci)].width = w
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    fname = f"supplier_sheet_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@router.get("/export/supplier/pdf")
+def export_supplier_pdf(ids: str = Query(..., description="Comma-separated job IDs")):
+    try:
+        job_ids = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid job IDs.")
+    if not job_ids:
+        raise HTTPException(status_code=400, detail="No valid job IDs provided.")
+
+    rows = _fetch_jobs_by_ids(job_ids)
+
+    out = io.BytesIO()
+    doc = SimpleDocTemplate(
+        out,
+        pagesize=A4,
+        rightMargin=1 * cm, leftMargin=1 * cm,
+        topMargin=1.5 * cm, bottomMargin=1 * cm,
+    )
+    styles      = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "SupTitle", parent=styles["Heading1"],
+        fontSize=12, textColor=colors.HexColor("#0F172A"),
+        spaceAfter=2, alignment=1,
+    )
+    sub_style = ParagraphStyle(
+        "SupSub", parent=styles["Normal"],
+        fontSize=8, textColor=colors.HexColor("#64748B"),
+        spaceAfter=10, alignment=1,
+    )
+
+    elements   = []
+    logo_bytes = _get_logo()
+    title_para = Paragraph("Shri Neminath Printers &amp; Packaging", title_style)
+    sub_para   = Paragraph(
+        f"Supplier Paper Requirement Sheet &nbsp;|&nbsp; "
+        f"Generated: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+        f" &nbsp;|&nbsp; Records: {len(rows)}",
+        sub_style,
+    )
+
+    if logo_bytes:
+        try:
+            logo_img = RLImage(io.BytesIO(logo_bytes))
+            logo_img._restrictSize(2.5 * cm, 1.8 * cm)
+            header_data = [[logo_img, [title_para, sub_para]]]
+            header_tbl  = Table(header_data, colWidths=[3 * cm, None])
+            header_tbl.setStyle(TableStyle([
+                ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING",  (0, 0), (0, 0),  0),
+                ("RIGHTPADDING", (0, 0), (0, 0),  8),
+                ("LEFTPADDING",  (1, 0), (1, 0),  8),
+            ]))
+            elements.append(header_tbl)
+        except Exception:
+            elements += [title_para, sub_para]
+    else:
+        elements += [title_para, sub_para]
+
+    tbl_data = [["#", "Paper Quality", "GSM", "Sheet L (cm)", "Sheet W (cm)", "Final Sheets", "Total KG"]]
+    for i, job in enumerate(rows, 1):
+        tbl_data.append([
+            str(i),
+            job["paper_quality"],
+            str(job["gsm"]),
+            str(job["sheet_length"]),
+            str(job["sheet_width"]),
+            str(job["final_sheets"]),
+            str(job["total_kg"]),
+        ])
+
+    col_w = [1 * cm, 4.5 * cm, 2 * cm, 2.5 * cm, 2.5 * cm, 3 * cm, 2.5 * cm]
+    tbl   = Table(tbl_data, colWidths=col_w, repeatRows=1)
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND",     (0, 0), (-1, 0),  colors.HexColor("#1E40AF")),
+        ("TEXTCOLOR",      (0, 0), (-1, 0),  colors.white),
+        ("FONTNAME",       (0, 0), (-1, 0),  "Helvetica-Bold"),
+        ("FONTSIZE",       (0, 0), (-1, 0),  8),
+        ("ALIGN",          (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN",         (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#EFF6FF")]),
+        ("FONTSIZE",       (0, 1), (-1, -1), 8),
+        ("GRID",           (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
+        ("TOPPADDING",     (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING",  (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(tbl)
+    doc.build(elements)
+    out.seek(0)
+
+    fname = f"supplier_sheet_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     return StreamingResponse(
         out,
         media_type="application/pdf",

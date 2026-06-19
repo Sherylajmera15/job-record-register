@@ -72,6 +72,45 @@ export interface ExportRange {
   to?: string;   // YYYY-MM-DD, omitted for "all_time"
 }
 
+export interface PartialEntry {
+  id: number;
+  customer_name: string | null;
+  job_name: string | null;
+  artworks: string | null;
+  length: number | null;
+  width: number | null;
+  height: number | null;
+  gsm: number | null;
+  paper_quality: string | null;
+  order_quantity: number | null;
+  sheet_length: number | null;
+  sheet_width: number | null;
+  ups: number | null;
+  base_sheets: number | null;
+  wastage_percentage: number | null;
+  final_sheets: number | null;
+  total_kg: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PartialEntryCreate {
+  customer_name?: string | null;
+  job_name?: string | null;
+  artworks?: string;
+  length?: number | null;
+  width?: number | null;
+  height?: number | null;
+  gsm?: number | null;
+  paper_quality?: string | null;
+  order_quantity?: number | null;
+  sheet_length?: number | null;
+  sheet_width?: number | null;
+  ups?: number | null;
+  notes?: string;
+}
+
 export type ToastKind = 'success' | 'error' | 'info';
 
 export interface ToastMsg {

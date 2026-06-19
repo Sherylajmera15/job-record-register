@@ -80,3 +80,42 @@ class CalculationResult(BaseModel):
     wastage_percentage: float
     final_sheets: int
     total_kg: float
+
+
+class PartialEntryCreate(BaseModel):
+    customer_name: Optional[str] = None
+    job_name: Optional[str] = None
+    artworks: Optional[str] = ""
+    length: Optional[float] = None
+    width: Optional[float] = None
+    height: Optional[float] = None
+    gsm: Optional[int] = None
+    paper_quality: Optional[str] = None
+    order_quantity: Optional[int] = None
+    sheet_length: Optional[float] = None
+    sheet_width: Optional[float] = None
+    ups: Optional[int] = None
+    notes: Optional[str] = ""
+
+
+class PartialEntryResponse(BaseModel):
+    id: int
+    customer_name: Optional[str] = None
+    job_name: Optional[str] = None
+    artworks: Optional[str] = ""
+    length: Optional[float] = None
+    width: Optional[float] = None
+    height: Optional[float] = None
+    gsm: Optional[int] = None
+    paper_quality: Optional[str] = None
+    order_quantity: Optional[int] = None
+    sheet_length: Optional[float] = None
+    sheet_width: Optional[float] = None
+    ups: Optional[int] = None
+    base_sheets: Optional[int] = None
+    wastage_percentage: Optional[float] = None
+    final_sheets: Optional[int] = None
+    total_kg: Optional[float] = None
+    notes: Optional[str] = ""
+    created_at: datetime
+    updated_at: datetime

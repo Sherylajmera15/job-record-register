@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Job, JobCreate, DualDashboardStats, ExportRange, SortOption } from '@/types';
+import { Job, JobCreate, DualDashboardStats, ExportRange, SortOption, PartialEntry, PartialEntryCreate } from '@/types';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -31,6 +31,33 @@ export const jobsApi = {
 
   pdfUrl: (search?: string, range?: ExportRange) =>
     `${BASE}/api/jobs/export/pdf${exportQuery(search, range)}`,
+};
+
+export const gsmApi = {
+  values: () => http.get<number[]>('/api/jobs/gsm-values'),
+};
+
+export const partialApi = {
+  list: (search?: string) =>
+    http.get<PartialEntry[]>('/api/partial-entries', { params: { search: search || undefined } }),
+
+  create: (data: PartialEntryCreate) => http.post<PartialEntry>('/api/partial-entries', data),
+
+  update: (id: number, data: PartialEntryCreate) =>
+    http.put<PartialEntry>(`/api/partial-entries/${id}`, data),
+
+  remove: (id: number) => http.delete(`/api/partial-entries/${id}`),
+
+  complete: (id: number, job: JobCreate) =>
+    http.post<Job>(`/api/partial-entries/${id}/complete`, job),
+};
+
+export const supplierApi = {
+  excelUrl: (ids: number[]) =>
+    `${BASE}/api/jobs/export/supplier/excel?ids=${ids.join(',')}`,
+
+  pdfUrl: (ids: number[]) =>
+    `${BASE}/api/jobs/export/supplier/pdf?ids=${ids.join(',')}`,
 };
 
 export const dashboardApi = {

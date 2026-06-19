@@ -72,5 +72,31 @@ def init_db() -> None:
             END $$
         """)
 
+    # ── Partial Entries (draft/incomplete records) ────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS partial_entries (
+            id                  SERIAL PRIMARY KEY,
+            customer_name       VARCHAR(255),
+            job_name            VARCHAR(255),
+            artworks            VARCHAR(500)     DEFAULT '',
+            length              DOUBLE PRECISION,
+            width               DOUBLE PRECISION,
+            height              DOUBLE PRECISION,
+            gsm                 INTEGER,
+            paper_quality       VARCHAR(100),
+            order_quantity      INTEGER,
+            sheet_length        DOUBLE PRECISION,
+            sheet_width         DOUBLE PRECISION,
+            ups                 INTEGER,
+            base_sheets         INTEGER,
+            wastage_percentage  DOUBLE PRECISION,
+            final_sheets        INTEGER,
+            total_kg            DOUBLE PRECISION,
+            notes               TEXT             DEFAULT '',
+            created_at          TIMESTAMPTZ      DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ      DEFAULT NOW()
+        )
+    """)
+
     conn.commit()
     conn.close()
