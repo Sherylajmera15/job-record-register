@@ -28,7 +28,9 @@ interface FormState {
   order_quantity: string;
   sheet_length: string;
   sheet_width: string;
-  ups: string;
+  printing_type: string;
+  outer_ups: string;
+  inner_ups: string;
 }
 
 interface Errors { [key: string]: string }
@@ -38,7 +40,8 @@ const emptyForm = (): FormState => ({
   length: '', width: '', height: '',
   gsm_input: '',
   paper_quality: 'FBB ITC', custom_quality: '',
-  order_quantity: '', sheet_length: '', sheet_width: '', ups: '',
+  order_quantity: '', sheet_length: '', sheet_width: '',
+  printing_type: 'outer', outer_ups: '', inner_ups: '',
 });
 
 export default function JobForm({ editJob, mode = 'create', onSave, onSavePartial, onClose }: Props) {
@@ -80,16 +83,28 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
       order_quantity: editJob.order_quantity > 0 ? String(editJob.order_quantity) : '',
       sheet_length: editJob.sheet_length > 0 ? String(editJob.sheet_length) : '',
       sheet_width: editJob.sheet_width > 0 ? String(editJob.sheet_width) : '',
-      ups: editJob.ups > 0 ? String(editJob.ups) : '',
+      printing_type: editJob.printing_type || 'outer',
+      outer_ups: editJob.outer_ups ? String(editJob.outer_ups) : (editJob.ups > 0 ? String(editJob.ups) : ''),
+      inner_ups: editJob.inner_ups ? String(editJob.inner_ups) : '',
     });
   }, [editJob]);
 
+  // Compute total UPS from form state (derived, not stored)
+  const computedTotalUps: number = (() => {
+    const o = Number(form.outer_ups) || 0;
+    const i = Number(form.inner_ups) || 0;
+    if (form.printing_type === 'inner') return i;
+    if (form.printing_type === 'both') return o + i;
+    return o;
+  })();
+
   useEffect(() => {
     setCalc(calculateJob(
-      Number(form.order_quantity), Number(form.ups),
+      Number(form.order_quantity), computedTotalUps,
       Number(form.sheet_length), Number(form.sheet_width), Number(form.gsm_input),
     ));
-  }, [form.order_quantity, form.ups, form.sheet_length, form.sheet_width, form.gsm_input]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.order_quantity, form.printing_type, form.outer_ups, form.inner_ups, form.sheet_length, form.sheet_width, form.gsm_input]);
 
   const set = useCallback((field: keyof FormState) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
@@ -97,6 +112,11 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
     setForm(prev => ({ ...prev, [field]: e.target.value }));
     setErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
   }, []);
+
+  const setPrintingType = (pt: string) => {
+    setForm(prev => ({ ...prev, printing_type: pt }));
+    setErrors(prev => { const n = { ...prev }; delete n.outer_ups; delete n.inner_ups; return n; });
+  };
 
   // Company suggestions
   const filteredCompanies = companies.filter(c =>
@@ -133,7 +153,12 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
     if (!form.order_quantity || Number(form.order_quantity) <= 0) e.order_quantity = 'Required, must be > 0.';
     if (!form.sheet_length || Number(form.sheet_length) <= 0) e.sheet_length = 'Required, must be > 0.';
     if (!form.sheet_width || Number(form.sheet_width) <= 0) e.sheet_width = 'Required, must be > 0.';
-    if (!form.ups || Number(form.ups) <= 0) e.ups = 'Required, must be > 0.';
+    if (form.printing_type === 'outer' || form.printing_type === 'both') {
+      if (!form.outer_ups || Number(form.outer_ups) <= 0) e.outer_ups = 'Required, must be > 0.';
+    }
+    if (form.printing_type === 'inner' || form.printing_type === 'both') {
+      if (!form.inner_ups || Number(form.inner_ups) <= 0) e.inner_ups = 'Required, must be > 0.';
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -156,7 +181,11 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
         order_quantity: Number(form.order_quantity),
         sheet_length: Number(form.sheet_length),
         sheet_width: Number(form.sheet_width),
-        ups: Number(form.ups),
+        printing_type: form.printing_type,
+        outer_ups: (form.printing_type === 'outer' || form.printing_type === 'both')
+          ? Number(form.outer_ups) : undefined,
+        inner_ups: (form.printing_type === 'inner' || form.printing_type === 'both')
+          ? Number(form.inner_ups) : undefined,
       });
     } finally {
       setSaving(false);
@@ -181,7 +210,9 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
         order_quantity: form.order_quantity ? Number(form.order_quantity) || null : null,
         sheet_length: form.sheet_length ? Number(form.sheet_length) || null : null,
         sheet_width: form.sheet_width ? Number(form.sheet_width) || null : null,
-        ups: form.ups ? Number(form.ups) || null : null,
+        printing_type: form.printing_type || null,
+        outer_ups: form.outer_ups ? Number(form.outer_ups) || null : null,
+        inner_ups: form.inner_ups ? Number(form.inner_ups) || null : null,
       });
     } finally {
       setSavingPartial(false);
@@ -293,7 +324,145 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
             <input className="form-input" value={form.artworks} onChange={set('artworks')} placeholder="e.g. Version A, Final Design" />
           </div>
 
-          {/* 4. Box Size */}
+          {/* 4. Order Quantity */}
+          <div>
+            <label className="form-label">Order Quantity <span style={{ color: '#f87171' }}>*</span></label>
+            <input className={inputCls('order_quantity')} type="number" min="1" step="1" value={form.order_quantity} onChange={set('order_quantity')} placeholder="e.g. 10000" />
+            {err('order_quantity')}
+          </div>
+
+          {/* 5. Sheet Size */}
+          <div>
+            <label className="form-label">Sheet Size (Length × Width in cm) <span style={{ color: '#f87171' }}>*</span></label>
+            <p className="text-xs mb-2" style={{ color: '#3d5070' }}>Paper sheet dimensions, not the box dimensions.</p>
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <input className={inputCls('sheet_length')} type="number" step="any" value={form.sheet_length} onChange={set('sheet_length')} placeholder="Sheet Length" />
+                {err('sheet_length')}
+              </div>
+              <span className="font-bold text-lg pb-0.5" style={{ color: '#1e2d50' }}>×</span>
+              <div className="flex-1">
+                <input className={inputCls('sheet_width')} type="number" step="any" value={form.sheet_width} onChange={set('sheet_width')} placeholder="Sheet Width" />
+                {err('sheet_width')}
+              </div>
+            </div>
+          </div>
+
+          {/* 6. Paper GSM */}
+          <div className="relative">
+            <label className="form-label">Paper GSM <span style={{ color: '#f87171' }}>*</span></label>
+            <input
+              className={inputCls('gsm_input')}
+              type="number"
+              step="1"
+              min="1"
+              value={form.gsm_input}
+              onChange={e => { set('gsm_input')(e); setShowGsmSuggestions(true); }}
+              onFocus={() => setShowGsmSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowGsmSuggestions(false), 150)}
+              placeholder="e.g. 300, 350"
+              autoComplete="off"
+            />
+            {err('gsm_input')}
+            {showGsmSuggestions && filteredGsmValues.length > 0 && (
+              <ul
+                className="absolute z-50 left-0 right-0 rounded-lg shadow-xl"
+                style={{ top: 'calc(100% + 4px)', background: '#141c35', border: '1px solid #1e2d50', maxHeight: '160px', overflowY: 'auto' }}
+              >
+                {filteredGsmValues.map(v => (
+                  <li
+                    key={v}
+                    onMouseDown={() => selectGsm(String(v))}
+                    className="px-4 py-2.5 cursor-pointer text-sm"
+                    style={{ color: '#e2e8f0', borderBottom: '1px solid #1e2d50' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(224,64,251,0.1)'; (e.currentTarget as HTMLElement).style.color = '#e040fb'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = '#e2e8f0'; }}
+                  >
+                    {v}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* 7. Printing Type + UPS */}
+          <div>
+            <label className="form-label">Printing Type <span style={{ color: '#f87171' }}>*</span></label>
+            <div className="flex gap-2 mt-1">
+              {(['outer', 'inner', 'both'] as const).map(pt => (
+                <button
+                  key={pt}
+                  type="button"
+                  onClick={() => setPrintingType(pt)}
+                  className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold transition-all capitalize"
+                  style={form.printing_type === pt
+                    ? { background: 'rgba(0,204,240,0.18)', color: '#00ccf0', border: '1px solid rgba(0,204,240,0.5)' }
+                    : { background: '#141c35', color: '#3d5070', border: '1px solid #1e2d50' }
+                  }
+                >
+                  {pt === 'outer' ? 'Outer' : pt === 'inner' ? 'Inner' : 'Both'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {(form.printing_type === 'outer' || form.printing_type === 'both') && (
+            <div>
+              <label className="form-label">
+                Outer UPS <span style={{ color: '#f87171' }}>*</span>
+                <span className="ml-1.5 text-xs font-normal" style={{ color: '#3d5070' }}>boxes per sheet (outer)</span>
+              </label>
+              <input className={inputCls('outer_ups')} type="number" min="1" step="1" value={form.outer_ups} onChange={set('outer_ups')} placeholder="e.g. 4" />
+              {err('outer_ups')}
+            </div>
+          )}
+
+          {(form.printing_type === 'inner' || form.printing_type === 'both') && (
+            <div>
+              <label className="form-label">
+                Inner UPS <span style={{ color: '#f87171' }}>*</span>
+                <span className="ml-1.5 text-xs font-normal" style={{ color: '#3d5070' }}>boxes per sheet (inner)</span>
+              </label>
+              <input className={inputCls('inner_ups')} type="number" min="1" step="1" value={form.inner_ups} onChange={set('inner_ups')} placeholder="e.g. 2" />
+              {err('inner_ups')}
+            </div>
+          )}
+
+          {form.printing_type === 'both' && Number(form.outer_ups) > 0 && Number(form.inner_ups) > 0 && (
+            <div
+              className="flex items-center justify-between px-4 py-2.5 rounded-lg"
+              style={{ background: 'rgba(0,204,240,0.07)', border: '1px solid rgba(0,204,240,0.2)' }}
+            >
+              <span className="text-sm font-medium" style={{ color: '#64748b' }}>Total UPS</span>
+              <span className="text-sm font-bold" style={{ color: '#00ccf0' }}>
+                {Number(form.outer_ups) + Number(form.inner_ups)}
+                <span className="ml-1.5 text-xs font-normal" style={{ color: '#3d5070' }}>
+                  ({form.outer_ups} outer + {form.inner_ups} inner)
+                </span>
+              </span>
+            </div>
+          )}
+
+          {/* 8. Paper Quality */}
+          <div>
+            <label className="form-label">Paper Quality <span style={{ color: '#f87171' }}>*</span></label>
+            <select className="form-input" value={form.paper_quality} onChange={set('paper_quality')}>
+              {QUALITY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+            {form.paper_quality === 'Other' && (
+              <div className="mt-2">
+                <input
+                  className={inputCls('custom_quality')}
+                  value={form.custom_quality}
+                  onChange={set('custom_quality')}
+                  placeholder="Enter paper quality"
+                />
+                {err('custom_quality')}
+              </div>
+            )}
+          </div>
+
+          {/* 9. Box Size (Optional — always last) */}
           <div>
             <label className="form-label">
               Box Size (Length × Width × Height in cm)
@@ -312,96 +481,6 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
                 <input className="form-input" type="number" step="any" value={form.height} onChange={set('height')} placeholder="Height" />
               </div>
             </div>
-          </div>
-
-          {/* 5 & 6. Paper GSM + Paper Quality */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* GSM — typable with autocomplete */}
-            <div className="relative">
-              <label className="form-label">Paper GSM <span style={{ color: '#f87171' }}>*</span></label>
-              <input
-                className={inputCls('gsm_input')}
-                type="number"
-                step="1"
-                min="1"
-                value={form.gsm_input}
-                onChange={e => { set('gsm_input')(e); setShowGsmSuggestions(true); }}
-                onFocus={() => setShowGsmSuggestions(true)}
-                onBlur={() => setTimeout(() => setShowGsmSuggestions(false), 150)}
-                placeholder="e.g. 300, 350"
-                autoComplete="off"
-              />
-              {err('gsm_input')}
-              {showGsmSuggestions && filteredGsmValues.length > 0 && (
-                <ul
-                  className="absolute z-50 left-0 right-0 rounded-lg shadow-xl"
-                  style={{ top: 'calc(100% + 4px)', background: '#141c35', border: '1px solid #1e2d50', maxHeight: '160px', overflowY: 'auto' }}
-                >
-                  {filteredGsmValues.map(v => (
-                    <li
-                      key={v}
-                      onMouseDown={() => selectGsm(String(v))}
-                      className="px-4 py-2.5 cursor-pointer text-sm"
-                      style={{ color: '#e2e8f0', borderBottom: '1px solid #1e2d50' }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(224,64,251,0.1)'; (e.currentTarget as HTMLElement).style.color = '#e040fb'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = '#e2e8f0'; }}
-                    >
-                      {v}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {/* Paper Quality */}
-            <div>
-              <label className="form-label">Paper Quality <span style={{ color: '#f87171' }}>*</span></label>
-              <select className="form-input" value={form.paper_quality} onChange={set('paper_quality')}>
-                {QUALITY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
-              {form.paper_quality === 'Other' && (
-                <div className="mt-2">
-                  <input
-                    className={inputCls('custom_quality')}
-                    value={form.custom_quality}
-                    onChange={set('custom_quality')}
-                    placeholder="Enter paper quality"
-                  />
-                  {err('custom_quality')}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 7. Order Quantity */}
-          <div>
-            <label className="form-label">Order Quantity <span style={{ color: '#f87171' }}>*</span></label>
-            <input className={inputCls('order_quantity')} type="number" min="1" step="1" value={form.order_quantity} onChange={set('order_quantity')} placeholder="e.g. 10000" />
-            {err('order_quantity')}
-          </div>
-
-          {/* 8. Sheet Size */}
-          <div>
-            <label className="form-label">Sheet Size (Length × Width in cm) <span style={{ color: '#f87171' }}>*</span></label>
-            <p className="text-xs mb-2" style={{ color: '#3d5070' }}>Paper sheet dimensions, not the box dimensions.</p>
-            <div className="flex items-center gap-2">
-              <div className="flex-1">
-                <input className={inputCls('sheet_length')} type="number" step="any" value={form.sheet_length} onChange={set('sheet_length')} placeholder="Sheet Length" />
-                {err('sheet_length')}
-              </div>
-              <span className="font-bold text-lg pb-0.5" style={{ color: '#1e2d50' }}>×</span>
-              <div className="flex-1">
-                <input className={inputCls('sheet_width')} type="number" step="any" value={form.sheet_width} onChange={set('sheet_width')} placeholder="Sheet Width" />
-                {err('sheet_width')}
-              </div>
-            </div>
-          </div>
-
-          {/* 9. UPS */}
-          <div>
-            <label className="form-label">UPS (boxes per sheet) <span style={{ color: '#f87171' }}>*</span></label>
-            <input className={inputCls('ups')} type="number" min="1" step="1" value={form.ups} onChange={set('ups')} placeholder="e.g. 4" />
-            {err('ups')}
           </div>
 
           {/* Live Calc Preview */}

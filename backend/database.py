@@ -50,13 +50,11 @@ def init_db() -> None:
 
     # ── Migrations (safe to run on every startup) ─────────────────────────────
 
-    # Add artworks column if it was not present in an older schema
     cur.execute("""
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS
             artworks VARCHAR(500) NOT NULL DEFAULT ''
     """)
 
-    # Make box-dimension columns nullable if they are still NOT NULL
     for col in ("length", "width", "height"):
         cur.execute(f"""
             DO $$
@@ -71,6 +69,22 @@ def init_db() -> None:
                 END IF;
             END $$
         """)
+
+    # ── UPS redesign columns ──────────────────────────────────────────────────
+    cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS printing_type VARCHAR(10)")
+    cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS outer_ups     INTEGER")
+    cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS inner_ups     INTEGER")
+    cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS total_ups     INTEGER")
+
+    # Migrate existing rows: treat all old records as Outer printing type
+    cur.execute("""
+        UPDATE jobs
+        SET printing_type = 'outer',
+            outer_ups     = ups,
+            total_ups     = ups
+        WHERE total_ups IS NULL
+          AND ups        IS NOT NULL
+    """)
 
     # ── Partial Entries (draft/incomplete records) ────────────────────────────
     cur.execute("""
@@ -96,6 +110,21 @@ def init_db() -> None:
             created_at          TIMESTAMPTZ      DEFAULT NOW(),
             updated_at          TIMESTAMPTZ      DEFAULT NOW()
         )
+    """)
+
+    cur.execute("ALTER TABLE partial_entries ADD COLUMN IF NOT EXISTS printing_type VARCHAR(10)")
+    cur.execute("ALTER TABLE partial_entries ADD COLUMN IF NOT EXISTS outer_ups     INTEGER")
+    cur.execute("ALTER TABLE partial_entries ADD COLUMN IF NOT EXISTS inner_ups     INTEGER")
+    cur.execute("ALTER TABLE partial_entries ADD COLUMN IF NOT EXISTS total_ups     INTEGER")
+
+    # Migrate existing partial rows
+    cur.execute("""
+        UPDATE partial_entries
+        SET printing_type = 'outer',
+            outer_ups     = ups,
+            total_ups     = ups
+        WHERE ups IS NOT NULL
+          AND total_ups IS NULL
     """)
 
     conn.commit()

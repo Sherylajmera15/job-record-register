@@ -79,6 +79,16 @@ _SORT_MAP = {
 }
 
 
+def _resolve_ups(printing_type: str, outer_ups, inner_ups) -> int:
+    """Compute the effective total UPS from the three printing-type fields."""
+    pt = (printing_type or "outer").lower()
+    if pt == "inner":
+        return int(inner_ups or 0)
+    elif pt == "both":
+        return int(outer_ups or 0) + int(inner_ups or 0)
+    return int(outer_ups or 0)  # outer (default)
+
+
 def _fmt_box(job: dict) -> str:
     parts = [str(job[k]) for k in ("length", "width", "height") if job.get(k) is not None]
     return "×".join(parts) if parts else "—"
@@ -594,12 +604,16 @@ def get_jobs(
 
 @router.post("", response_model=JobResponse, status_code=201)
 def create_job(job: JobCreate):
+    total_ups = _resolve_ups(job.printing_type, job.outer_ups, job.inner_ups)
+    if total_ups <= 0:
+        raise HTTPException(status_code=422, detail="UPS must be greater than 0.")
+
     conn = get_connection()
     cur  = dict_cursor(conn)
     try:
         calc = calculate_job(
             order_quantity=job.order_quantity,
-            ups=job.ups,
+            ups=total_ups,
             sheet_length=job.sheet_length,
             sheet_width=job.sheet_width,
             gsm=job.gsm,
@@ -610,9 +624,10 @@ def create_job(job: JobCreate):
                 customer_name, job_name, artworks,
                 length, width, height,
                 gsm, paper_quality,
-                order_quantity, sheet_length, sheet_width, ups,
+                order_quantity, sheet_length, sheet_width,
+                ups, printing_type, outer_ups, inner_ups, total_ups,
                 base_sheets, wastage_percentage, final_sheets, total_kg
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
         """, [
             job.customer_name, job.job_name, job.artworks,
@@ -620,7 +635,7 @@ def create_job(job: JobCreate):
             job.gsm, job.paper_quality,
             job.order_quantity,
             job.sheet_length, job.sheet_width,
-            job.ups,
+            total_ups, job.printing_type, job.outer_ups, job.inner_ups, total_ups,
             calc["base_sheets"], calc["wastage_percentage"],
             calc["final_sheets"], calc["total_kg"],
         ])
@@ -672,12 +687,18 @@ def update_job(job_id: int, job: JobUpdate):
             "order_quantity": job.order_quantity  if job.order_quantity is not None else ex["order_quantity"],
             "sheet_length":   job.sheet_length    if job.sheet_length   is not None else ex["sheet_length"],
             "sheet_width":    job.sheet_width     if job.sheet_width    is not None else ex["sheet_width"],
-            "ups":            job.ups             if job.ups            is not None else ex["ups"],
+            "printing_type":  job.printing_type   if job.printing_type  is not None else (ex.get("printing_type") or "outer"),
+            "outer_ups":      job.outer_ups       if job.outer_ups      is not None else ex.get("outer_ups"),
+            "inner_ups":      job.inner_ups       if job.inner_ups      is not None else ex.get("inner_ups"),
         }
+
+        total_ups = _resolve_ups(merged["printing_type"], merged["outer_ups"], merged["inner_ups"])
+        if total_ups <= 0:
+            raise HTTPException(status_code=422, detail="UPS must be greater than 0.")
 
         calc = calculate_job(
             order_quantity=merged["order_quantity"],
-            ups=merged["ups"],
+            ups=total_ups,
             sheet_length=merged["sheet_length"],
             sheet_width=merged["sheet_width"],
             gsm=merged["gsm"],
@@ -697,6 +718,10 @@ def update_job(job_id: int, job: JobUpdate):
                 sheet_length       = %s,
                 sheet_width        = %s,
                 ups                = %s,
+                printing_type      = %s,
+                outer_ups          = %s,
+                inner_ups          = %s,
+                total_ups          = %s,
                 base_sheets        = %s,
                 wastage_percentage = %s,
                 final_sheets       = %s,
@@ -710,7 +735,7 @@ def update_job(job_id: int, job: JobUpdate):
             merged["gsm"], merged["paper_quality"],
             merged["order_quantity"],
             merged["sheet_length"], merged["sheet_width"],
-            merged["ups"],
+            total_ups, merged["printing_type"], merged["outer_ups"], merged["inner_ups"], total_ups,
             calc["base_sheets"], calc["wastage_percentage"],
             calc["final_sheets"], calc["total_kg"],
             job_id,

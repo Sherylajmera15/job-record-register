@@ -213,7 +213,16 @@ export default function JobTable({ jobs, loading, sortBy, onSortChange, onEdit, 
                 </span>
               </td>
               {/* UPS */}
-              <td className="px-4 py-3 whitespace-nowrap text-center" style={{ color: '#94a3b8' }}>{job.ups}</td>
+              <td className="px-4 py-3 whitespace-nowrap text-center">
+                {job.printing_type === 'both' ? (
+                  <div className="text-xs leading-tight">
+                    <div style={{ color: '#3d5070' }}>{job.outer_ups}+{job.inner_ups}</div>
+                    <div className="font-bold" style={{ color: '#00ccf0' }}>{job.total_ups ?? job.ups}</div>
+                  </div>
+                ) : (
+                  <span style={{ color: '#94a3b8' }}>{job.total_ups ?? job.ups}</span>
+                )}
+              </td>
               {/* Final Sheets */}
               <td className="px-4 py-3 whitespace-nowrap">
                 <span className="font-bold" style={{ color: '#00ccf0' }}>{job.final_sheets.toLocaleString('en-IN')}</span>

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import NoScrollNumberInputs from '@/components/NoScrollNumberInputs';
 
 export const metadata: Metadata = {
   title: 'Shri Neminath Printers & Packaging — Job Record Register',
@@ -9,7 +10,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <NoScrollNumberInputs />
+        {children}
+      </body>
     </html>
   );
 }

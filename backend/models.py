@@ -15,7 +15,9 @@ class JobCreate(BaseModel):
     order_quantity: int = Field(..., gt=0)
     sheet_length: float = Field(..., gt=0)
     sheet_width: float = Field(..., gt=0)
-    ups: int = Field(..., gt=0)
+    printing_type: str = "outer"
+    outer_ups: Optional[int] = Field(default=None, ge=1)
+    inner_ups: Optional[int] = Field(default=None, ge=1)
 
 
 class JobUpdate(BaseModel):
@@ -30,7 +32,9 @@ class JobUpdate(BaseModel):
     order_quantity: Optional[int] = None
     sheet_length: Optional[float] = None
     sheet_width: Optional[float] = None
-    ups: Optional[int] = None
+    printing_type: Optional[str] = None
+    outer_ups: Optional[int] = None
+    inner_ups: Optional[int] = None
 
 
 class JobResponse(BaseModel):
@@ -53,6 +57,10 @@ class JobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     artworks: str = ""
+    printing_type: str = "outer"
+    outer_ups: Optional[int] = None
+    inner_ups: Optional[int] = None
+    total_ups: Optional[int] = None
 
 
 class DashboardStats(BaseModel):
@@ -94,7 +102,9 @@ class PartialEntryCreate(BaseModel):
     order_quantity: Optional[int] = None
     sheet_length: Optional[float] = None
     sheet_width: Optional[float] = None
-    ups: Optional[int] = None
+    printing_type: Optional[str] = None
+    outer_ups: Optional[int] = None
+    inner_ups: Optional[int] = None
     notes: Optional[str] = ""
 
 
@@ -112,6 +122,10 @@ class PartialEntryResponse(BaseModel):
     sheet_length: Optional[float] = None
     sheet_width: Optional[float] = None
     ups: Optional[int] = None
+    printing_type: Optional[str] = None
+    outer_ups: Optional[int] = None
+    inner_ups: Optional[int] = None
+    total_ups: Optional[int] = None
     base_sheets: Optional[int] = None
     wastage_percentage: Optional[float] = None
     final_sheets: Optional[int] = None
