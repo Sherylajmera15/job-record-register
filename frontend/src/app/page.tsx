@@ -207,6 +207,12 @@ export default function HomePage() {
 
   const formMode = completingPartialId !== null ? 'complete' : editJob ? 'edit' : 'create';
 
+  const downloadSelected = (url: string) => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.click();
+  };
+
   return (
     <div className="min-h-screen" style={{ background: '#06091a' }}>
       {/* Top Header */}
@@ -291,6 +297,38 @@ export default function HomePage() {
                     </svg>
                     Export to Supplier ({selectedJobIds.size})
                   </button>
+                )}
+                {selectedJobIds.size > 0 && (
+                  <>
+                    <button
+                      onClick={() => downloadSelected(jobsApi.selectedExcelUrl(Array.from(selectedJobIds)))}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors shadow-sm"
+                      style={{ background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.3)' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(52,211,153,0.25)'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(52,211,153,0.15)'; }}
+                      title="Export only the selected jobs as a full Excel record (all fields)"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      Export Selected ({selectedJobIds.size}) → Excel
+                    </button>
+                    <button
+                      onClick={() => downloadSelected(jobsApi.selectedPdfUrl(Array.from(selectedJobIds)))}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors shadow-sm"
+                      style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(248,113,113,0.25)'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(248,113,113,0.15)'; }}
+                      title="Export only the selected jobs as a full PDF record (all fields)"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                      </svg>
+                      Export Selected ({selectedJobIds.size}) → PDF
+                    </button>
+                  </>
                 )}
                 <ExportButtons search={search} totalFiltered={jobs.length} />
               </div>

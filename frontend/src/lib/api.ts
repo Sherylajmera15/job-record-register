@@ -31,6 +31,12 @@ export const jobsApi = {
 
   pdfUrl: (search?: string, range?: ExportRange) =>
     `${BASE}/api/jobs/export/pdf${exportQuery(search, range)}`,
+
+  selectedExcelUrl: (ids: number[]) =>
+    `${BASE}/api/jobs/export/selected/excel?ids=${ids.join(',')}`,
+
+  selectedPdfUrl: (ids: number[]) =>
+    `${BASE}/api/jobs/export/selected/pdf?ids=${ids.join(',')}`,
 };
 
 export const gsmApi = {

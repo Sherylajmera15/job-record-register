@@ -164,14 +164,7 @@ def get_gsm_values():
 
 # ── Export endpoints (must come before /{job_id}) ─────────────────────────────
 
-@router.get("/export/excel")
-def export_excel(
-    search: Optional[str] = Query(None),
-    from_date: Optional[str] = Query(None, description="YYYY-MM-DD — start of created_at range"),
-    to_date: Optional[str] = Query(None, description="YYYY-MM-DD — end of created_at range"),
-):
-    rows = _fetch_jobs(search, "newest", _parse_date("from_date", from_date), _parse_date("to_date", to_date))
-
+def _build_jobs_excel(rows: list[dict]) -> io.BytesIO:
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Job Records"
@@ -264,6 +257,17 @@ def export_excel(
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
+    return out
+
+
+@router.get("/export/excel")
+def export_excel(
+    search: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None, description="YYYY-MM-DD — start of created_at range"),
+    to_date: Optional[str] = Query(None, description="YYYY-MM-DD — end of created_at range"),
+):
+    rows = _fetch_jobs(search, "newest", _parse_date("from_date", from_date), _parse_date("to_date", to_date))
+    out = _build_jobs_excel(rows)
     fname = f"job_records_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return StreamingResponse(
         out,
@@ -272,14 +276,7 @@ def export_excel(
     )
 
 
-@router.get("/export/pdf")
-def export_pdf(
-    search: Optional[str] = Query(None),
-    from_date: Optional[str] = Query(None, description="YYYY-MM-DD — start of created_at range"),
-    to_date: Optional[str] = Query(None, description="YYYY-MM-DD — end of created_at range"),
-):
-    rows = _fetch_jobs(search, "newest", _parse_date("from_date", from_date), _parse_date("to_date", to_date))
-
+def _build_jobs_pdf(rows: list[dict]) -> io.BytesIO:
     out = io.BytesIO()
     doc = SimpleDocTemplate(
         out,
@@ -364,7 +361,17 @@ def export_pdf(
     elements.append(tbl)
     doc.build(elements)
     out.seek(0)
+    return out
 
+
+@router.get("/export/pdf")
+def export_pdf(
+    search: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None, description="YYYY-MM-DD — start of created_at range"),
+    to_date: Optional[str] = Query(None, description="YYYY-MM-DD — end of created_at range"),
+):
+    rows = _fetch_jobs(search, "newest", _parse_date("from_date", from_date), _parse_date("to_date", to_date))
+    out = _build_jobs_pdf(rows)
     fname = f"job_records_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     return StreamingResponse(
         out,
@@ -390,15 +397,19 @@ def _fetch_jobs_by_ids(job_ids: list[int]) -> list[dict]:
     return rows
 
 
-@router.get("/export/supplier/excel")
-def export_supplier_excel(ids: str = Query(..., description="Comma-separated job IDs")):
+def _parse_job_ids(ids: str) -> list[int]:
     try:
         job_ids = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid job IDs.")
     if not job_ids:
         raise HTTPException(status_code=400, detail="No valid job IDs provided.")
+    return job_ids
 
+
+@router.get("/export/supplier/excel")
+def export_supplier_excel(ids: str = Query(..., description="Comma-separated job IDs")):
+    job_ids = _parse_job_ids(ids)
     rows = _fetch_jobs_by_ids(job_ids)
 
     wb = openpyxl.Workbook()
@@ -484,13 +495,7 @@ def export_supplier_excel(ids: str = Query(..., description="Comma-separated job
 
 @router.get("/export/supplier/pdf")
 def export_supplier_pdf(ids: str = Query(..., description="Comma-separated job IDs")):
-    try:
-        job_ids = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid job IDs.")
-    if not job_ids:
-        raise HTTPException(status_code=400, detail="No valid job IDs provided.")
-
+    job_ids = _parse_job_ids(ids)
     rows = _fetch_jobs_by_ids(job_ids)
 
     out = io.BytesIO()
@@ -572,6 +577,34 @@ def export_supplier_pdf(ids: str = Query(..., description="Comma-separated job I
     out.seek(0)
 
     fname = f"supplier_sheet_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    return StreamingResponse(
+        out,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+# ── Export selected jobs (full normal export, scoped to checkbox selection) ──
+
+@router.get("/export/selected/excel")
+def export_selected_excel(ids: str = Query(..., description="Comma-separated job IDs")):
+    job_ids = _parse_job_ids(ids)
+    rows = _fetch_jobs_by_ids(job_ids)
+    out = _build_jobs_excel(rows)
+    fname = f"job_records_selected_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@router.get("/export/selected/pdf")
+def export_selected_pdf(ids: str = Query(..., description="Comma-separated job IDs")):
+    job_ids = _parse_job_ids(ids)
+    rows = _fetch_jobs_by_ids(job_ids)
+    out = _build_jobs_pdf(rows)
+    fname = f"job_records_selected_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     return StreamingResponse(
         out,
         media_type="application/pdf",
