@@ -18,6 +18,7 @@ class JobCreate(BaseModel):
     printing_type: str = "outer"
     outer_ups: Optional[int] = Field(default=None, ge=1)
     inner_ups: Optional[int] = Field(default=None, ge=1)
+    ups: Optional[int] = Field(default=None, ge=1)
 
 
 class JobUpdate(BaseModel):

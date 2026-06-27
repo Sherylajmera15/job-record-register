@@ -174,7 +174,10 @@ def delete_partial(entry_id: int):
 
 @router.post("/{entry_id}/complete", response_model=JobResponse, status_code=201)
 def complete_partial(entry_id: int, job_data: JobCreate):
-    total_ups = _resolve_ups(job_data.printing_type, job_data.outer_ups, job_data.inner_ups)
+    if job_data.outer_ups is None and job_data.inner_ups is None and job_data.ups is not None:
+        total_ups = job_data.ups
+    else:
+        total_ups = _resolve_ups(job_data.printing_type, job_data.outer_ups, job_data.inner_ups)
     if total_ups <= 0:
         raise HTTPException(status_code=422, detail="UPS must be greater than 0.")
 

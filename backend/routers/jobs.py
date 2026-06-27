@@ -604,7 +604,11 @@ def get_jobs(
 
 @router.post("", response_model=JobResponse, status_code=201)
 def create_job(job: JobCreate):
-    total_ups = _resolve_ups(job.printing_type, job.outer_ups, job.inner_ups)
+    # Backward compat: if old client sends only the legacy 'ups' field, treat it as outer_ups
+    if job.outer_ups is None and job.inner_ups is None and job.ups is not None:
+        total_ups = job.ups
+    else:
+        total_ups = _resolve_ups(job.printing_type, job.outer_ups, job.inner_ups)
     if total_ups <= 0:
         raise HTTPException(status_code=422, detail="UPS must be greater than 0.")
 
@@ -692,7 +696,11 @@ def update_job(job_id: int, job: JobUpdate):
             "inner_ups":      job.inner_ups       if job.inner_ups      is not None else ex.get("inner_ups"),
         }
 
-        total_ups = _resolve_ups(merged["printing_type"], merged["outer_ups"], merged["inner_ups"])
+        # Backward compat: fallback to legacy 'ups' if new fields not provided
+        if merged.get("outer_ups") is None and merged.get("inner_ups") is None and ex.get("ups"):
+            total_ups = ex["ups"]
+        else:
+            total_ups = _resolve_ups(merged["printing_type"], merged["outer_ups"], merged["inner_ups"])
         if total_ups <= 0:
             raise HTTPException(status_code=422, detail="UPS must be greater than 0.")
 
