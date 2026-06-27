@@ -7,6 +7,7 @@ import CalculationPreview from './CalculationPreview';
 
 const QUALITY_BASE = ['FBB ITC', 'Saffire XL', 'Grey Back', 'White Back'];
 const QUALITY_OPTIONS = [...QUALITY_BASE, 'Other'];
+const PRINTING_TYPES = ['outer', 'inner', 'both'] as const;
 
 interface Props {
   editPartial: PartialEntry | null;
@@ -27,9 +28,9 @@ interface FormState {
   order_quantity: string;
   sheet_length: string;
   sheet_width: string;
+  ups: string;
   printing_type: string;
-  outer_ups: string;
-  inner_ups: string;
+  remarks: string;
   notes: string;
 }
 
@@ -38,7 +39,7 @@ const emptyForm = (): FormState => ({
   length: '', width: '', height: '',
   gsm_input: '', paper_quality: '', custom_quality: '',
   order_quantity: '', sheet_length: '', sheet_width: '',
-  printing_type: 'outer', outer_ups: '', inner_ups: '',
+  ups: '', printing_type: 'outer', remarks: '',
   notes: '',
 });
 
@@ -70,29 +71,19 @@ export default function PartialEntryEditForm({ editPartial, onSave, onClose }: P
       order_quantity: editPartial.order_quantity != null ? String(editPartial.order_quantity) : '',
       sheet_length: editPartial.sheet_length != null ? String(editPartial.sheet_length) : '',
       sheet_width: editPartial.sheet_width != null ? String(editPartial.sheet_width) : '',
+      ups: editPartial.ups != null ? String(editPartial.ups) : '',
       printing_type: editPartial.printing_type || 'outer',
-      outer_ups: editPartial.outer_ups != null ? String(editPartial.outer_ups)
-        : (editPartial.ups != null ? String(editPartial.ups) : ''),
-      inner_ups: editPartial.inner_ups != null ? String(editPartial.inner_ups) : '',
+      remarks: editPartial.remarks ?? '',
       notes: editPartial.notes ?? '',
     });
   }, [editPartial]);
 
-  const computedTotalUps: number = (() => {
-    const o = Number(form.outer_ups) || 0;
-    const i = Number(form.inner_ups) || 0;
-    if (form.printing_type === 'inner') return i;
-    if (form.printing_type === 'both') return o + i;
-    return o;
-  })();
-
   useEffect(() => {
     setCalc(calculateJob(
-      Number(form.order_quantity), computedTotalUps,
+      Number(form.order_quantity), Number(form.ups),
       Number(form.sheet_length), Number(form.sheet_width), Number(form.gsm_input),
     ));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.order_quantity, form.printing_type, form.outer_ups, form.inner_ups, form.sheet_length, form.sheet_width, form.gsm_input]);
+  }, [form.order_quantity, form.ups, form.sheet_length, form.sheet_width, form.gsm_input]);
 
   const set = useCallback((field: keyof FormState) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -129,9 +120,9 @@ export default function PartialEntryEditForm({ editPartial, onSave, onClose }: P
         order_quantity: form.order_quantity ? Number(form.order_quantity) || null : null,
         sheet_length: form.sheet_length ? Number(form.sheet_length) || null : null,
         sheet_width: form.sheet_width ? Number(form.sheet_width) || null : null,
+        ups: form.ups ? Number(form.ups) || null : null,
         printing_type: form.printing_type || null,
-        outer_ups: form.outer_ups ? Number(form.outer_ups) || null : null,
-        inner_ups: form.inner_ups ? Number(form.inner_ups) || null : null,
+        remarks: form.remarks.trim() || undefined,
         notes: form.notes.trim(),
       });
     } finally {
@@ -242,11 +233,11 @@ export default function PartialEntryEditForm({ editPartial, onSave, onClose }: P
             )}
           </div>
 
-          {/* 7. Printing Type + UPS */}
+          {/* 7. Printing Type (info only) */}
           <div>
             <label className="form-label">Printing Type</label>
             <div className="flex gap-2 mt-1">
-              {(['outer', 'inner', 'both'] as const).map(pt => (
+              {PRINTING_TYPES.map(pt => (
                 <button
                   key={pt}
                   type="button"
@@ -263,40 +254,25 @@ export default function PartialEntryEditForm({ editPartial, onSave, onClose }: P
             </div>
           </div>
 
-          {(form.printing_type === 'outer' || form.printing_type === 'both') && (
-            <div>
-              <label className="form-label">
-                Outer UPS
-                <span className="ml-1.5 text-xs font-normal" style={{ color: '#3d5070' }}>boxes per sheet (outer)</span>
-              </label>
-              <input className="form-input" type="number" min="1" step="1" value={form.outer_ups} onChange={set('outer_ups')} placeholder="e.g. 4" />
-            </div>
-          )}
+          {/* UPS */}
+          <div>
+            <label className="form-label">UPS (boxes per sheet)</label>
+            <input className="form-input" type="number" min="1" step="1" value={form.ups} onChange={set('ups')} placeholder="e.g. 4" />
+          </div>
 
-          {(form.printing_type === 'inner' || form.printing_type === 'both') && (
-            <div>
-              <label className="form-label">
-                Inner UPS
-                <span className="ml-1.5 text-xs font-normal" style={{ color: '#3d5070' }}>boxes per sheet (inner)</span>
-              </label>
-              <input className="form-input" type="number" min="1" step="1" value={form.inner_ups} onChange={set('inner_ups')} placeholder="e.g. 2" />
-            </div>
-          )}
-
-          {form.printing_type === 'both' && Number(form.outer_ups) > 0 && Number(form.inner_ups) > 0 && (
-            <div
-              className="flex items-center justify-between px-4 py-2.5 rounded-lg"
-              style={{ background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.2)' }}
-            >
-              <span className="text-sm font-medium" style={{ color: '#64748b' }}>Total UPS</span>
-              <span className="text-sm font-bold" style={{ color: '#fbbf24' }}>
-                {Number(form.outer_ups) + Number(form.inner_ups)}
-                <span className="ml-1.5 text-xs font-normal" style={{ color: '#3d5070' }}>
-                  ({form.outer_ups} outer + {form.inner_ups} inner)
-                </span>
-              </span>
-            </div>
-          )}
+          {/* Remarks */}
+          <div>
+            <label className="form-label">
+              Remarks
+              <span className="ml-2 text-xs font-normal" style={{ color: '#3d5070' }}>Optional</span>
+            </label>
+            <input
+              className="form-input"
+              value={form.remarks}
+              onChange={set('remarks')}
+              placeholder="e.g. 2 outer + 1 inner, special instructions..."
+            />
+          </div>
 
           {/* 8. Paper Quality */}
           <div>
@@ -315,7 +291,7 @@ export default function PartialEntryEditForm({ editPartial, onSave, onClose }: P
             )}
           </div>
 
-          {/* 9. Box Size (Optional — always last) */}
+          {/* 9. Box Size */}
           <div>
             <label className="form-label">Box Size (L × W × H in cm)</label>
             <div className="flex items-center gap-2">
@@ -340,7 +316,6 @@ export default function PartialEntryEditForm({ editPartial, onSave, onClose }: P
             />
           </div>
 
-          {/* Calc Preview (only when enough data) */}
           <CalculationPreview result={calc} />
         </div>
 

@@ -86,6 +86,8 @@ def init_db() -> None:
           AND ups        IS NOT NULL
     """)
 
+    cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS remarks TEXT DEFAULT ''")
+
     # ── Partial Entries (draft/incomplete records) ────────────────────────────
     cur.execute("""
         CREATE TABLE IF NOT EXISTS partial_entries (
@@ -126,6 +128,8 @@ def init_db() -> None:
         WHERE ups IS NOT NULL
           AND total_ups IS NULL
     """)
+
+    cur.execute("ALTER TABLE partial_entries ADD COLUMN IF NOT EXISTS remarks TEXT DEFAULT ''")
 
     conn.commit()
     conn.close()

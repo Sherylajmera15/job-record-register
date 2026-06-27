@@ -79,15 +79,6 @@ _SORT_MAP = {
 }
 
 
-def _resolve_ups(printing_type: str, outer_ups, inner_ups) -> int:
-    """Compute the effective total UPS from the three printing-type fields."""
-    pt = (printing_type or "outer").lower()
-    if pt == "inner":
-        return int(inner_ups or 0)
-    elif pt == "both":
-        return int(outer_ups or 0) + int(inner_ups or 0)
-    return int(outer_ups or 0)  # outer (default)
-
 
 def _fmt_box(job: dict) -> str:
     parts = [str(job[k]) for k in ("length", "width", "height") if job.get(k) is not None]
@@ -604,20 +595,12 @@ def get_jobs(
 
 @router.post("", response_model=JobResponse, status_code=201)
 def create_job(job: JobCreate):
-    # Backward compat: if old client sends only the legacy 'ups' field, treat it as outer_ups
-    if job.outer_ups is None and job.inner_ups is None and job.ups is not None:
-        total_ups = job.ups
-    else:
-        total_ups = _resolve_ups(job.printing_type, job.outer_ups, job.inner_ups)
-    if total_ups <= 0:
-        raise HTTPException(status_code=422, detail="UPS must be greater than 0.")
-
     conn = get_connection()
     cur  = dict_cursor(conn)
     try:
         calc = calculate_job(
             order_quantity=job.order_quantity,
-            ups=total_ups,
+            ups=job.ups,
             sheet_length=job.sheet_length,
             sheet_width=job.sheet_width,
             gsm=job.gsm,
@@ -629,9 +612,9 @@ def create_job(job: JobCreate):
                 length, width, height,
                 gsm, paper_quality,
                 order_quantity, sheet_length, sheet_width,
-                ups, printing_type, outer_ups, inner_ups, total_ups,
+                ups, printing_type, remarks,
                 base_sheets, wastage_percentage, final_sheets, total_kg
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
         """, [
             job.customer_name, job.job_name, job.artworks,
@@ -639,7 +622,7 @@ def create_job(job: JobCreate):
             job.gsm, job.paper_quality,
             job.order_quantity,
             job.sheet_length, job.sheet_width,
-            total_ups, job.printing_type, job.outer_ups, job.inner_ups, total_ups,
+            job.ups, job.printing_type, job.remarks,
             calc["base_sheets"], calc["wastage_percentage"],
             calc["final_sheets"], calc["total_kg"],
         ])
@@ -682,7 +665,7 @@ def update_job(job_id: int, job: JobUpdate):
         merged = {
             "customer_name":  job.customer_name  if job.customer_name  is not None else ex["customer_name"],
             "job_name":       job.job_name        if job.job_name       is not None else ex["job_name"],
-            "artworks":       job.artworks        if job.artworks       is not None else ex["artworks"],
+            "artworks":       job.artworks        if job.artworks       is not None else ex.get("artworks", ""),
             "length":         job.length          if job.length         is not None else ex["length"],
             "width":          job.width           if job.width          is not None else ex["width"],
             "height":         job.height          if job.height         is not None else ex["height"],
@@ -691,22 +674,14 @@ def update_job(job_id: int, job: JobUpdate):
             "order_quantity": job.order_quantity  if job.order_quantity is not None else ex["order_quantity"],
             "sheet_length":   job.sheet_length    if job.sheet_length   is not None else ex["sheet_length"],
             "sheet_width":    job.sheet_width     if job.sheet_width    is not None else ex["sheet_width"],
+            "ups":            job.ups             if job.ups            is not None else ex["ups"],
             "printing_type":  job.printing_type   if job.printing_type  is not None else (ex.get("printing_type") or "outer"),
-            "outer_ups":      job.outer_ups       if job.outer_ups      is not None else ex.get("outer_ups"),
-            "inner_ups":      job.inner_ups       if job.inner_ups      is not None else ex.get("inner_ups"),
+            "remarks":        job.remarks         if job.remarks        is not None else ex.get("remarks", ""),
         }
-
-        # Backward compat: fallback to legacy 'ups' if new fields not provided
-        if merged.get("outer_ups") is None and merged.get("inner_ups") is None and ex.get("ups"):
-            total_ups = ex["ups"]
-        else:
-            total_ups = _resolve_ups(merged["printing_type"], merged["outer_ups"], merged["inner_ups"])
-        if total_ups <= 0:
-            raise HTTPException(status_code=422, detail="UPS must be greater than 0.")
 
         calc = calculate_job(
             order_quantity=merged["order_quantity"],
-            ups=total_ups,
+            ups=merged["ups"],
             sheet_length=merged["sheet_length"],
             sheet_width=merged["sheet_width"],
             gsm=merged["gsm"],
@@ -727,9 +702,7 @@ def update_job(job_id: int, job: JobUpdate):
                 sheet_width        = %s,
                 ups                = %s,
                 printing_type      = %s,
-                outer_ups          = %s,
-                inner_ups          = %s,
-                total_ups          = %s,
+                remarks            = %s,
                 base_sheets        = %s,
                 wastage_percentage = %s,
                 final_sheets       = %s,
@@ -743,7 +716,7 @@ def update_job(job_id: int, job: JobUpdate):
             merged["gsm"], merged["paper_quality"],
             merged["order_quantity"],
             merged["sheet_length"], merged["sheet_width"],
-            total_ups, merged["printing_type"], merged["outer_ups"], merged["inner_ups"], total_ups,
+            merged["ups"], merged["printing_type"], merged["remarks"],
             calc["base_sheets"], calc["wastage_percentage"],
             calc["final_sheets"], calc["total_kg"],
             job_id,

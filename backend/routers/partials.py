@@ -7,22 +7,12 @@ from calculations import calculate_job
 router = APIRouter(prefix="/api/partial-entries", tags=["partials"])
 
 
-def _resolve_ups(printing_type: Optional[str], outer_ups: Optional[int], inner_ups: Optional[int]) -> int:
-    pt = (printing_type or "outer").lower()
-    if pt == "inner":
-        return int(inner_ups or 0)
-    elif pt == "both":
-        return int(outer_ups or 0) + int(inner_ups or 0)
-    return int(outer_ups or 0)
-
-
 def _try_compute(data: PartialEntryCreate) -> dict:
-    total_ups = _resolve_ups(data.printing_type, data.outer_ups, data.inner_ups)
-    if all([data.order_quantity, total_ups, data.sheet_length, data.sheet_width, data.gsm]):
+    if all([data.order_quantity, data.ups, data.sheet_length, data.sheet_width, data.gsm]):
         try:
             return calculate_job(
                 order_quantity=data.order_quantity,
-                ups=total_ups,
+                ups=data.ups,
                 sheet_length=data.sheet_length,
                 sheet_width=data.sheet_width,
                 gsm=data.gsm,
@@ -46,9 +36,10 @@ def list_partials(search: Optional[str] = Query(None)):
                 artworks      ILIKE %s OR
                 paper_quality ILIKE %s OR
                 CAST(gsm AS TEXT) ILIKE %s OR
-                notes         ILIKE %s
+                notes         ILIKE %s OR
+                remarks       ILIKE %s
             ORDER BY created_at DESC
-        """, [s] * 6)
+        """, [s] * 7)
     else:
         cur.execute("SELECT * FROM partial_entries ORDER BY created_at DESC")
     rows = [dict(r) for r in cur.fetchall()]
@@ -59,7 +50,6 @@ def list_partials(search: Optional[str] = Query(None)):
 @router.post("", response_model=PartialEntryResponse, status_code=201)
 def create_partial(data: PartialEntryCreate):
     calc = _try_compute(data)
-    total_ups = _resolve_ups(data.printing_type, data.outer_ups, data.inner_ups)
     conn = get_connection()
     cur  = dict_cursor(conn)
     try:
@@ -69,18 +59,17 @@ def create_partial(data: PartialEntryCreate):
                 length, width, height,
                 gsm, paper_quality,
                 order_quantity, sheet_length, sheet_width,
-                ups, printing_type, outer_ups, inner_ups, total_ups,
+                ups, printing_type, remarks,
                 base_sheets, wastage_percentage, final_sheets, total_kg,
                 notes
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
         """, [
             data.customer_name, data.job_name, data.artworks or "",
             data.length, data.width, data.height,
             data.gsm, data.paper_quality,
             data.order_quantity, data.sheet_length, data.sheet_width,
-            total_ups or None,
-            data.printing_type, data.outer_ups, data.inner_ups, total_ups or None,
+            data.ups, data.printing_type, data.remarks or "",
             calc["base_sheets"], calc["wastage_percentage"], calc["final_sheets"], calc["total_kg"],
             data.notes or "",
         ])
@@ -97,7 +86,6 @@ def create_partial(data: PartialEntryCreate):
 @router.put("/{entry_id}", response_model=PartialEntryResponse)
 def update_partial(entry_id: int, data: PartialEntryCreate):
     calc = _try_compute(data)
-    total_ups = _resolve_ups(data.printing_type, data.outer_ups, data.inner_ups)
     conn = get_connection()
     cur  = dict_cursor(conn)
     try:
@@ -119,9 +107,7 @@ def update_partial(entry_id: int, data: PartialEntryCreate):
                 sheet_width        = %s,
                 ups                = %s,
                 printing_type      = %s,
-                outer_ups          = %s,
-                inner_ups          = %s,
-                total_ups          = %s,
+                remarks            = %s,
                 base_sheets        = %s,
                 wastage_percentage = %s,
                 final_sheets       = %s,
@@ -135,8 +121,7 @@ def update_partial(entry_id: int, data: PartialEntryCreate):
             data.length, data.width, data.height,
             data.gsm, data.paper_quality,
             data.order_quantity, data.sheet_length, data.sheet_width,
-            total_ups or None,
-            data.printing_type, data.outer_ups, data.inner_ups, total_ups or None,
+            data.ups, data.printing_type, data.remarks or "",
             calc["base_sheets"], calc["wastage_percentage"], calc["final_sheets"], calc["total_kg"],
             data.notes or "",
             entry_id,
@@ -174,13 +159,6 @@ def delete_partial(entry_id: int):
 
 @router.post("/{entry_id}/complete", response_model=JobResponse, status_code=201)
 def complete_partial(entry_id: int, job_data: JobCreate):
-    if job_data.outer_ups is None and job_data.inner_ups is None and job_data.ups is not None:
-        total_ups = job_data.ups
-    else:
-        total_ups = _resolve_ups(job_data.printing_type, job_data.outer_ups, job_data.inner_ups)
-    if total_ups <= 0:
-        raise HTTPException(status_code=422, detail="UPS must be greater than 0.")
-
     conn = get_connection()
     cur  = dict_cursor(conn)
     try:
@@ -190,7 +168,7 @@ def complete_partial(entry_id: int, job_data: JobCreate):
 
         calc = calculate_job(
             order_quantity=job_data.order_quantity,
-            ups=total_ups,
+            ups=job_data.ups,
             sheet_length=job_data.sheet_length,
             sheet_width=job_data.sheet_width,
             gsm=job_data.gsm,
@@ -202,16 +180,16 @@ def complete_partial(entry_id: int, job_data: JobCreate):
                 length, width, height,
                 gsm, paper_quality,
                 order_quantity, sheet_length, sheet_width,
-                ups, printing_type, outer_ups, inner_ups, total_ups,
+                ups, printing_type, remarks,
                 base_sheets, wastage_percentage, final_sheets, total_kg
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
         """, [
             job_data.customer_name, job_data.job_name, job_data.artworks or "",
             job_data.length, job_data.width, job_data.height,
             job_data.gsm, job_data.paper_quality,
             job_data.order_quantity, job_data.sheet_length, job_data.sheet_width,
-            total_ups, job_data.printing_type, job_data.outer_ups, job_data.inner_ups, total_ups,
+            job_data.ups, job_data.printing_type, job_data.remarks or "",
             calc["base_sheets"], calc["wastage_percentage"], calc["final_sheets"], calc["total_kg"],
         ])
         row = dict(cur.fetchone())

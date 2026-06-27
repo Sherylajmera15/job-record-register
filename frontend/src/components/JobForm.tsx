@@ -6,6 +6,7 @@ import { jobsApi, gsmApi } from '@/lib/api';
 import CalculationPreview from './CalculationPreview';
 
 const QUALITY_OPTIONS = ['FBB ITC', 'Saffire XL', 'Grey Back', 'White Back', 'Other'];
+const PRINTING_TYPES = ['outer', 'inner', 'both'] as const;
 
 interface Props {
   editJob?: Job | null;
@@ -28,9 +29,9 @@ interface FormState {
   order_quantity: string;
   sheet_length: string;
   sheet_width: string;
+  ups: string;
   printing_type: string;
-  outer_ups: string;
-  inner_ups: string;
+  remarks: string;
 }
 
 interface Errors { [key: string]: string }
@@ -41,7 +42,7 @@ const emptyForm = (): FormState => ({
   gsm_input: '',
   paper_quality: 'FBB ITC', custom_quality: '',
   order_quantity: '', sheet_length: '', sheet_width: '',
-  printing_type: 'outer', outer_ups: '', inner_ups: '',
+  ups: '', printing_type: 'outer', remarks: '',
 });
 
 export default function JobForm({ editJob, mode = 'create', onSave, onSavePartial, onClose }: Props) {
@@ -51,11 +52,8 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
   const [savingPartial, setSavingPartial] = useState(false);
   const [calc, setCalc] = useState<CalcResult | null>(null);
 
-  // Customer autocomplete
   const [companies, setCompanies] = useState<string[]>([]);
   const [showCompanySuggestions, setShowCompanySuggestions] = useState(false);
-
-  // GSM autocomplete
   const [gsmValues, setGsmValues] = useState<number[]>([]);
   const [showGsmSuggestions, setShowGsmSuggestions] = useState(false);
 
@@ -83,31 +81,21 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
       order_quantity: editJob.order_quantity > 0 ? String(editJob.order_quantity) : '',
       sheet_length: editJob.sheet_length > 0 ? String(editJob.sheet_length) : '',
       sheet_width: editJob.sheet_width > 0 ? String(editJob.sheet_width) : '',
+      ups: editJob.ups > 0 ? String(editJob.ups) : '',
       printing_type: editJob.printing_type || 'outer',
-      outer_ups: editJob.outer_ups ? String(editJob.outer_ups) : (editJob.ups > 0 ? String(editJob.ups) : ''),
-      inner_ups: editJob.inner_ups ? String(editJob.inner_ups) : '',
+      remarks: editJob.remarks ?? '',
     });
   }, [editJob]);
 
-  // Compute total UPS from form state (derived, not stored)
-  const computedTotalUps: number = (() => {
-    const o = Number(form.outer_ups) || 0;
-    const i = Number(form.inner_ups) || 0;
-    if (form.printing_type === 'inner') return i;
-    if (form.printing_type === 'both') return o + i;
-    return o;
-  })();
-
   useEffect(() => {
     setCalc(calculateJob(
-      Number(form.order_quantity), computedTotalUps,
+      Number(form.order_quantity), Number(form.ups),
       Number(form.sheet_length), Number(form.sheet_width), Number(form.gsm_input),
     ));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.order_quantity, form.printing_type, form.outer_ups, form.inner_ups, form.sheet_length, form.sheet_width, form.gsm_input]);
+  }, [form.order_quantity, form.ups, form.sheet_length, form.sheet_width, form.gsm_input]);
 
   const set = useCallback((field: keyof FormState) => (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
     setForm(prev => ({ ...prev, [field]: e.target.value }));
     setErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
@@ -115,10 +103,8 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
 
   const setPrintingType = (pt: string) => {
     setForm(prev => ({ ...prev, printing_type: pt }));
-    setErrors(prev => { const n = { ...prev }; delete n.outer_ups; delete n.inner_ups; return n; });
   };
 
-  // Company suggestions
   const filteredCompanies = companies.filter(c =>
     form.customer_name.trim() !== '' &&
     c.toLowerCase().includes(form.customer_name.toLowerCase()) &&
@@ -131,7 +117,6 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
     setShowCompanySuggestions(false);
   };
 
-  // GSM suggestions
   const filteredGsmValues = form.gsm_input.trim()
     ? gsmValues.filter(v => String(v).includes(form.gsm_input.trim()))
     : gsmValues;
@@ -153,12 +138,7 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
     if (!form.order_quantity || Number(form.order_quantity) <= 0) e.order_quantity = 'Required, must be > 0.';
     if (!form.sheet_length || Number(form.sheet_length) <= 0) e.sheet_length = 'Required, must be > 0.';
     if (!form.sheet_width || Number(form.sheet_width) <= 0) e.sheet_width = 'Required, must be > 0.';
-    if (form.printing_type === 'outer' || form.printing_type === 'both') {
-      if (!form.outer_ups || Number(form.outer_ups) <= 0) e.outer_ups = 'Required, must be > 0.';
-    }
-    if (form.printing_type === 'inner' || form.printing_type === 'both') {
-      if (!form.inner_ups || Number(form.inner_ups) <= 0) e.inner_ups = 'Required, must be > 0.';
-    }
+    if (!form.ups || Number(form.ups) <= 0) e.ups = 'Required, must be > 0.';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -181,11 +161,9 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
         order_quantity: Number(form.order_quantity),
         sheet_length: Number(form.sheet_length),
         sheet_width: Number(form.sheet_width),
+        ups: Number(form.ups),
         printing_type: form.printing_type,
-        outer_ups: (form.printing_type === 'outer' || form.printing_type === 'both')
-          ? Number(form.outer_ups) : undefined,
-        inner_ups: (form.printing_type === 'inner' || form.printing_type === 'both')
-          ? Number(form.inner_ups) : undefined,
+        remarks: form.remarks.trim(),
       });
     } finally {
       setSaving(false);
@@ -210,9 +188,9 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
         order_quantity: form.order_quantity ? Number(form.order_quantity) || null : null,
         sheet_length: form.sheet_length ? Number(form.sheet_length) || null : null,
         sheet_width: form.sheet_width ? Number(form.sheet_width) || null : null,
+        ups: form.ups ? Number(form.ups) || null : null,
         printing_type: form.printing_type || null,
-        outer_ups: form.outer_ups ? Number(form.outer_ups) || null : null,
-        inner_ups: form.inner_ups ? Number(form.inner_ups) || null : null,
+        remarks: form.remarks.trim() || undefined,
       });
     } finally {
       setSavingPartial(false);
@@ -274,11 +252,9 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
         {/* Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
 
-          {/* 1. Customer / Company Name */}
+          {/* 1. Customer */}
           <div className="relative">
-            <label className="form-label">
-              Customer / Company Name <span style={{ color: '#f87171' }}>*</span>
-            </label>
+            <label className="form-label">Customer / Company Name <span style={{ color: '#f87171' }}>*</span></label>
             <input
               ref={customerInputRef}
               className={inputCls('customer_name')}
@@ -385,11 +361,11 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
             )}
           </div>
 
-          {/* 7. Printing Type + UPS */}
+          {/* 7. Printing Type + UPS + Remarks */}
           <div>
-            <label className="form-label">Printing Type <span style={{ color: '#f87171' }}>*</span></label>
+            <label className="form-label">Printing Type</label>
             <div className="flex gap-2 mt-1">
-              {(['outer', 'inner', 'both'] as const).map(pt => (
+              {PRINTING_TYPES.map(pt => (
                 <button
                   key={pt}
                   type="button"
@@ -406,42 +382,24 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
             </div>
           </div>
 
-          {(form.printing_type === 'outer' || form.printing_type === 'both') && (
-            <div>
-              <label className="form-label">
-                Outer UPS <span style={{ color: '#f87171' }}>*</span>
-                <span className="ml-1.5 text-xs font-normal" style={{ color: '#3d5070' }}>boxes per sheet (outer)</span>
-              </label>
-              <input className={inputCls('outer_ups')} type="number" min="1" step="1" value={form.outer_ups} onChange={set('outer_ups')} placeholder="e.g. 4" />
-              {err('outer_ups')}
-            </div>
-          )}
+          <div>
+            <label className="form-label">UPS (boxes per sheet) <span style={{ color: '#f87171' }}>*</span></label>
+            <input className={inputCls('ups')} type="number" min="1" step="1" value={form.ups} onChange={set('ups')} placeholder="e.g. 4" />
+            {err('ups')}
+          </div>
 
-          {(form.printing_type === 'inner' || form.printing_type === 'both') && (
-            <div>
-              <label className="form-label">
-                Inner UPS <span style={{ color: '#f87171' }}>*</span>
-                <span className="ml-1.5 text-xs font-normal" style={{ color: '#3d5070' }}>boxes per sheet (inner)</span>
-              </label>
-              <input className={inputCls('inner_ups')} type="number" min="1" step="1" value={form.inner_ups} onChange={set('inner_ups')} placeholder="e.g. 2" />
-              {err('inner_ups')}
-            </div>
-          )}
-
-          {form.printing_type === 'both' && Number(form.outer_ups) > 0 && Number(form.inner_ups) > 0 && (
-            <div
-              className="flex items-center justify-between px-4 py-2.5 rounded-lg"
-              style={{ background: 'rgba(0,204,240,0.07)', border: '1px solid rgba(0,204,240,0.2)' }}
-            >
-              <span className="text-sm font-medium" style={{ color: '#64748b' }}>Total UPS</span>
-              <span className="text-sm font-bold" style={{ color: '#00ccf0' }}>
-                {Number(form.outer_ups) + Number(form.inner_ups)}
-                <span className="ml-1.5 text-xs font-normal" style={{ color: '#3d5070' }}>
-                  ({form.outer_ups} outer + {form.inner_ups} inner)
-                </span>
-              </span>
-            </div>
-          )}
+          <div>
+            <label className="form-label">
+              Remarks
+              <span className="ml-2 text-xs font-normal" style={{ color: '#3d5070' }}>Optional</span>
+            </label>
+            <input
+              className="form-input"
+              value={form.remarks}
+              onChange={set('remarks')}
+              placeholder="e.g. 2 outer + 1 inner, special instructions..."
+            />
+          </div>
 
           {/* 8. Paper Quality */}
           <div>
@@ -462,28 +420,21 @@ export default function JobForm({ editJob, mode = 'create', onSave, onSavePartia
             )}
           </div>
 
-          {/* 9. Box Size (Optional — always last) */}
+          {/* 9. Box Size (Optional) */}
           <div>
             <label className="form-label">
-              Box Size (Length × Width × Height in cm)
+              Box Size (L × W × H in cm)
               <span className="ml-2 text-xs font-normal" style={{ color: '#3d5070' }}>Optional</span>
             </label>
             <div className="flex items-center gap-2">
-              <div className="flex-1">
-                <input className="form-input" type="number" step="any" value={form.length} onChange={set('length')} placeholder="Length" />
-              </div>
+              <input className="form-input flex-1" type="number" step="any" value={form.length} onChange={set('length')} placeholder="Length" />
               <span className="font-bold text-lg pb-0.5" style={{ color: '#1e2d50' }}>×</span>
-              <div className="flex-1">
-                <input className="form-input" type="number" step="any" value={form.width} onChange={set('width')} placeholder="Width" />
-              </div>
+              <input className="form-input flex-1" type="number" step="any" value={form.width} onChange={set('width')} placeholder="Width" />
               <span className="font-bold text-lg pb-0.5" style={{ color: '#1e2d50' }}>×</span>
-              <div className="flex-1">
-                <input className="form-input" type="number" step="any" value={form.height} onChange={set('height')} placeholder="Height" />
-              </div>
+              <input className="form-input flex-1" type="number" step="any" value={form.height} onChange={set('height')} placeholder="Height" />
             </div>
           </div>
 
-          {/* Live Calc Preview */}
           <CalculationPreview result={calc} />
         </form>
 

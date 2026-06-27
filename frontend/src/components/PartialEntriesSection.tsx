@@ -13,12 +13,9 @@ interface Props {
 function countMissing(p: PartialEntry): number {
   const fields: (keyof PartialEntry)[] = [
     'customer_name', 'job_name', 'gsm', 'paper_quality',
-    'order_quantity', 'sheet_length', 'sheet_width',
+    'order_quantity', 'sheet_length', 'sheet_width', 'ups',
   ];
-  const missingFields = fields.filter(k => !p[k]).length;
-  // UPS is present if any UPS value was entered (total_ups / outer_ups / ups)
-  const hasUps = !!(p.total_ups ?? p.outer_ups ?? p.inner_ups ?? p.ups);
-  return missingFields + (hasUps ? 0 : 1);
+  return fields.filter(k => !p[k]).length;
 }
 
 function fmt(dt: string) {
