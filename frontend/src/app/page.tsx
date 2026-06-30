@@ -13,6 +13,7 @@ import PartialEntriesSection from '@/components/PartialEntriesSection';
 import SupplierExportModal from '@/components/SupplierExportModal';
 import RepeatOrderModal from '@/components/RepeatOrderModal';
 import JobDetailsDrawer from '@/components/JobDetailsDrawer';
+import DuplicateJobModal, { DuplicateMatch } from '@/components/DuplicateJobModal';
 import Toast from '@/components/Toast';
 
 export default function HomePage() {
@@ -30,6 +31,10 @@ export default function HomePage() {
 
   // Repeat Order
   const [repeatOrderJob, setRepeatOrderJob] = useState<Job | null>(null);
+
+  // Duplicate detection
+  const [duplicateMatches,  setDuplicateMatches]  = useState<DuplicateMatch[]>([]);
+  const [pendingSaveData,   setPendingSaveData]   = useState<JobCreate | null>(null);
 
   // Job Details Drawer
   const [detailsJob, setDetailsJob] = useState<Job | null>(null);
@@ -96,9 +101,49 @@ export default function HomePage() {
     fetchJobs(search, s);
   };
 
+  // ── Duplicate detection ────────────────────────────────────────────────────
+
+  const checkForDuplicates = async (jobName: string, artworks: string): Promise<DuplicateMatch[]> => {
+    const normName     = jobName.trim().toLowerCase();
+    const normArtworks = artworks.trim().toLowerCase();
+
+    // Both fields must be non-empty and identical for a duplicate to register
+    if (!normName || !normArtworks) return [];
+
+    const found: DuplicateMatch[] = [];
+
+    // Check in-memory jobs (active + paper planned)
+    for (const job of jobs) {
+      const jobArtworks = (job.artworks || '').trim().toLowerCase();
+      if (
+        job.job_name.trim().toLowerCase() === normName &&
+        jobArtworks !== '' &&
+        jobArtworks === normArtworks
+      ) {
+        found.push({ type: job.paper_planned ? 'paper_planned' : 'active', job });
+      }
+    }
+
+    // Check partial entries
+    try {
+      const res = await partialApi.list();
+      for (const p of res.data) {
+        const pName     = (p.job_name  || '').trim().toLowerCase();
+        const pArtworks = (p.artworks  || '').trim().toLowerCase();
+        if (pName === normName && pArtworks !== '' && pArtworks === normArtworks) {
+          found.push({ type: 'partial', partial: p });
+        }
+      }
+    } catch {
+      // non-critical — if partial check fails, still show job matches
+    }
+
+    return found;
+  };
+
   // ── Job form save ──────────────────────────────────────────────────────────
 
-  const handleSave = async (data: JobCreate) => {
+  const doSave = async (data: JobCreate) => {
     try {
       if (completingPartialId !== null) {
         await partialApi.complete(completingPartialId, data);
@@ -120,6 +165,44 @@ export default function HomePage() {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       toast(msg || 'Failed to save job. Please try again.', 'error');
     }
+  };
+
+  const handleSave = async (data: JobCreate) => {
+    // Duplicate check only when creating a brand-new job (not editing, not completing partial)
+    const isNewJob = completingPartialId === null && !editJob;
+    if (isNewJob) {
+      const matches = await checkForDuplicates(data.job_name, data.artworks);
+      if (matches.length > 0) {
+        setPendingSaveData(data);
+        setDuplicateMatches(matches);
+        return; // Hold — let the user decide
+      }
+    }
+    await doSave(data);
+  };
+
+  // ── Duplicate modal handlers ───────────────────────────────────────────────
+
+  const handleDuplicateRepeatOrder = (job: Job) => {
+    // Dismiss modal + job form, then open Repeat Order flow for the existing job
+    setDuplicateMatches([]);
+    setPendingSaveData(null);
+    setShowForm(false);
+    setEditJob(null);
+    setRepeatOrderJob(job);
+  };
+
+  const handleDuplicateCreateAnyway = async () => {
+    const data = pendingSaveData;
+    setDuplicateMatches([]);
+    setPendingSaveData(null);
+    if (data) await doSave(data);
+  };
+
+  const handleDuplicateCancel = () => {
+    setDuplicateMatches([]);
+    setPendingSaveData(null);
+    // Leave the job form open so the user can make changes
   };
 
   const handleSavePartial = async (data: PartialEntryCreate) => {
@@ -551,6 +634,16 @@ export default function HomePage() {
         <JobDetailsDrawer
           job={detailsJob}
           onClose={() => setDetailsJob(null)}
+        />
+      )}
+
+      {/* Duplicate Job Detection Modal */}
+      {duplicateMatches.length > 0 && (
+        <DuplicateJobModal
+          matches={duplicateMatches}
+          onRepeatOrder={handleDuplicateRepeatOrder}
+          onCreateAnyway={handleDuplicateCreateAnyway}
+          onCancel={handleDuplicateCancel}
         />
       )}
 
