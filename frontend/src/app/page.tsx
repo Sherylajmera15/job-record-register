@@ -1,8 +1,8 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
-import { Job, JobCreate, DualDashboardStats, SortOption, ToastMsg, PartialEntry, PartialEntryCreate } from '@/types';
-import { jobsApi, dashboardApi, partialApi } from '@/lib/api';
+import { Job, JobCreate, DualDashboardStats, SortOption, ToastMsg, PartialEntry, PartialEntryCreate, RepeatOrderCreate } from '@/types';
+import { jobsApi, dashboardApi, partialApi, repeatOrderApi } from '@/lib/api';
 import Dashboard from '@/components/Dashboard';
 import JobForm from '@/components/JobForm';
 import JobTable from '@/components/JobTable';
@@ -11,28 +11,36 @@ import ExportButtons from '@/components/ExportButtons';
 import DeleteConfirmModal from '@/components/DeleteConfirmModal';
 import PartialEntriesSection from '@/components/PartialEntriesSection';
 import SupplierExportModal from '@/components/SupplierExportModal';
+import RepeatOrderModal from '@/components/RepeatOrderModal';
+import JobDetailsDrawer from '@/components/JobDetailsDrawer';
 import Toast from '@/components/Toast';
 
 export default function HomePage() {
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [stats, setStats] = useState<DualDashboardStats | null>(null);
-  const [loadingJobs, setLoadingJobs] = useState(true);
+  const [jobs,         setJobs]         = useState<Job[]>([]);
+  const [stats,        setStats]        = useState<DualDashboardStats | null>(null);
+  const [loadingJobs,  setLoadingJobs]  = useState(true);
   const [loadingStats, setLoadingStats] = useState(true);
 
-  const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState<SortOption>('newest');
+  const [search,  setSearch]  = useState('');
+  const [sortBy,  setSortBy]  = useState<SortOption>('newest');
 
-  const [showForm, setShowForm] = useState(false);
-  const [editJob, setEditJob] = useState<Job | null>(null);
+  const [showForm,  setShowForm]  = useState(false);
+  const [editJob,   setEditJob]   = useState<Job | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Job | null>(null);
 
+  // Repeat Order
+  const [repeatOrderJob, setRepeatOrderJob] = useState<Job | null>(null);
+
+  // Job Details Drawer
+  const [detailsJob, setDetailsJob] = useState<Job | null>(null);
+
   // Supplier export selection
-  const [selectedJobIds, setSelectedJobIds] = useState<Set<number>>(new Set());
+  const [selectedJobIds,    setSelectedJobIds]    = useState<Set<number>>(new Set());
   const [showSupplierModal, setShowSupplierModal] = useState(false);
 
   // Partial entries
   const [completingPartialId, setCompletingPartialId] = useState<number | null>(null);
-  const [partialsRefreshKey, setPartialsRefreshKey] = useState(0);
+  const [partialsRefreshKey,  setPartialsRefreshKey]  = useState(0);
 
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
@@ -88,6 +96,8 @@ export default function HomePage() {
     fetchJobs(search, s);
   };
 
+  // ── Job form save ──────────────────────────────────────────────────────────
+
   const handleSave = async (data: JobCreate) => {
     try {
       if (completingPartialId !== null) {
@@ -125,6 +135,8 @@ export default function HomePage() {
     }
   };
 
+  // ── Edit / Delete ──────────────────────────────────────────────────────────
+
   const handleEdit = (job: Job) => {
     setCompletingPartialId(null);
     setEditJob(job);
@@ -149,30 +161,113 @@ export default function HomePage() {
     }
   };
 
+  // ── Repeat Order ───────────────────────────────────────────────────────────
+
+  const handleRepeatOrderSave = async (
+    jobId: number,
+    data: RepeatOrderCreate,
+    isPaperPlanned: boolean,
+  ) => {
+    try {
+      const sourceJob = jobs.find(j => j.id === jobId);
+      if (!sourceJob) return;
+
+      if (isPaperPlanned) {
+        // Create a brand-new independent job for the new quantity
+        await jobsApi.create({
+          customer_name: sourceJob.customer_name,
+          job_name:      sourceJob.job_name,
+          artworks:      sourceJob.artworks,
+          length:        sourceJob.length,
+          width:         sourceJob.width,
+          height:        sourceJob.height,
+          gsm:           sourceJob.gsm,
+          paper_quality: sourceJob.paper_quality,
+          order_quantity: data.order_quantity,
+          sheet_length:  sourceJob.sheet_length,
+          sheet_width:   sourceJob.sheet_width,
+          ups:           sourceJob.ups,
+          printing_type: sourceJob.printing_type,
+          remarks:       data.remarks || '',
+        });
+        // Remove Paper Planned from the original job (total situation has changed)
+        await jobsApi.togglePaperPlanned(jobId);
+        toast(`New job created for ${data.order_quantity.toLocaleString('en-IN')} units. Paper Planned removed from original.`);
+      } else {
+        // Normal repeat order under the existing job
+        await repeatOrderApi.create(jobId, data);
+        toast(`Repeat order of ${data.order_quantity.toLocaleString('en-IN')} units added.`);
+      }
+
+      setRepeatOrderJob(null);
+      await fetchJobs();
+      await fetchStats();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast(msg || 'Failed to save repeat order.', 'error');
+    }
+  };
+
+  // ── Paper Planned toggle ───────────────────────────────────────────────────
+
+  const handleTogglePaperPlanned = async (job: Job) => {
+    try {
+      await jobsApi.togglePaperPlanned(job.id);
+      const verb = job.paper_planned ? 'removed from' : 'marked on';
+      toast(`Paper Planned ${verb} "${job.job_name}".`);
+      await fetchJobs();
+    } catch {
+      toast('Failed to update Paper Planned status.', 'error');
+    }
+  };
+
+  // ── Bulk Paper Planned ─────────────────────────────────────────────────────
+
+  const handleBulkPaperPlanned = async (planned: boolean) => {
+    const ids = Array.from(selectedJobIds);
+    if (!ids.length) return;
+    try {
+      await jobsApi.bulkPaperPlanned(ids, planned);
+      toast(
+        planned
+          ? `${ids.length} job${ids.length > 1 ? 's' : ''} marked as Paper Planned.`
+          : `Paper Planned removed from ${ids.length} job${ids.length > 1 ? 's' : ''}.`,
+      );
+      await fetchJobs();
+    } catch {
+      toast('Failed to update Paper Planned status.', 'error');
+    }
+  };
+
+  // ── Complete Partial ───────────────────────────────────────────────────────
+
   const handleOpenCompletePartial = useCallback((partial: PartialEntry) => {
     setCompletingPartialId(partial.id);
     setEditJob({
       id: -1,
       customer_name: partial.customer_name ?? '',
-      job_name: partial.job_name ?? '',
-      artworks: partial.artworks ?? '',
-      length: partial.length ?? null,
-      width: partial.width ?? null,
-      height: partial.height ?? null,
-      gsm: partial.gsm ?? 0,
+      job_name:      partial.job_name ?? '',
+      artworks:      partial.artworks ?? '',
+      length:        partial.length ?? null,
+      width:         partial.width ?? null,
+      height:        partial.height ?? null,
+      gsm:           partial.gsm ?? 0,
       paper_quality: partial.paper_quality ?? '',
       order_quantity: partial.order_quantity ?? 0,
-      sheet_length: partial.sheet_length ?? 0,
-      sheet_width: partial.sheet_width ?? 0,
-      ups: partial.ups ?? 0,
+      sheet_length:  partial.sheet_length ?? 0,
+      sheet_width:   partial.sheet_width ?? 0,
+      ups:           partial.ups ?? 0,
       printing_type: partial.printing_type || 'outer',
-      remarks: partial.remarks ?? '',
-      base_sheets: 0,
+      remarks:       partial.remarks ?? '',
+      base_sheets:   0,
       wastage_percentage: 0,
-      final_sheets: 0,
-      total_kg: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      final_sheets:  0,
+      total_kg:      0,
+      created_at:    new Date().toISOString(),
+      updated_at:    new Date().toISOString(),
+      paper_planned: false,
+      repeat_order_count: 0,
+      repeat_total_qty:   0,
     });
     setShowForm(true);
   }, []);
@@ -188,6 +283,8 @@ export default function HomePage() {
     setEditJob(null);
     setCompletingPartialId(null);
   };
+
+  // ── Selection ──────────────────────────────────────────────────────────────
 
   const handleToggleSelect = useCallback((id: number) => {
     setSelectedJobIds(prev => {
@@ -263,6 +360,8 @@ export default function HomePage() {
         <div className="card p-4 mb-4">
           <div className="flex flex-col gap-3">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+
+              {/* Left: title + badges */}
               <div className="flex items-center gap-3 flex-wrap">
                 <h2 className="text-base font-bold text-white">Job Records</h2>
                 {!loadingJobs && (
@@ -282,7 +381,37 @@ export default function HomePage() {
                   </span>
                 )}
               </div>
+
+              {/* Right: action buttons */}
               <div className="flex flex-wrap items-center gap-2">
+
+                {/* Bulk Paper Planned buttons (only when selection is active) */}
+                {selectedJobIds.size > 0 && (
+                  <>
+                    <button
+                      onClick={() => handleBulkPaperPlanned(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors shadow-sm"
+                      style={{ background: 'rgba(52,211,153,0.12)', color: '#34d399', border: '1px solid rgba(52,211,153,0.3)' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(52,211,153,0.22)'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(52,211,153,0.12)'; }}
+                      title="Mark all selected jobs as Paper Planned"
+                    >
+                      ✓ Mark Paper Planned ({selectedJobIds.size})
+                    </button>
+                    <button
+                      onClick={() => handleBulkPaperPlanned(false)}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors shadow-sm"
+                      style={{ background: 'rgba(100,116,139,0.12)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.25)' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(100,116,139,0.22)'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(100,116,139,0.12)'; }}
+                      title="Remove Paper Planned from all selected jobs"
+                    >
+                      Remove Paper Planned ({selectedJobIds.size})
+                    </button>
+                  </>
+                )}
+
+                {/* Supplier Export */}
                 {selectedJobIds.size > 0 && (
                   <button
                     onClick={() => setShowSupplierModal(true)}
@@ -298,6 +427,8 @@ export default function HomePage() {
                     Export to Supplier ({selectedJobIds.size})
                   </button>
                 )}
+
+                {/* Export Selected — full format */}
                 {selectedJobIds.size > 0 && (
                   <>
                     <button
@@ -306,13 +437,13 @@ export default function HomePage() {
                       style={{ background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.3)' }}
                       onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(52,211,153,0.25)'; }}
                       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(52,211,153,0.15)'; }}
-                      title="Export only the selected jobs as a full Excel record (all fields)"
+                      title="Export selected jobs as full Excel record"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                           d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
-                      Export Selected ({selectedJobIds.size}) → Excel
+                      Selected Excel ({selectedJobIds.size})
                     </button>
                     <button
                       onClick={() => downloadSelected(jobsApi.selectedPdfUrl(Array.from(selectedJobIds)))}
@@ -320,19 +451,21 @@ export default function HomePage() {
                       style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}
                       onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(248,113,113,0.25)'; }}
                       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(248,113,113,0.15)'; }}
-                      title="Export only the selected jobs as a full PDF record (all fields)"
+                      title="Export selected jobs as full PDF record"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                           d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                       </svg>
-                      Export Selected ({selectedJobIds.size}) → PDF
+                      Selected PDF ({selectedJobIds.size})
                     </button>
                   </>
                 )}
+
                 <ExportButtons search={search} totalFiltered={jobs.length} />
               </div>
             </div>
+
             <SearchSort
               search={search}
               sortBy={sortBy}
@@ -350,6 +483,9 @@ export default function HomePage() {
           onSortChange={handleSortChange}
           onEdit={handleEdit}
           onDelete={setDeleteTarget}
+          onRepeatOrder={setRepeatOrderJob}
+          onTogglePaperPlanned={handleTogglePaperPlanned}
+          onViewDetails={setDetailsJob}
           selectedIds={selectedJobIds}
           onToggleSelect={handleToggleSelect}
           onToggleSelectAll={handleToggleSelectAll}
@@ -360,7 +496,7 @@ export default function HomePage() {
           <p className="text-center text-xs mt-4" style={{ color: '#3d5070' }}>
             Showing {jobs.length} record{jobs.length !== 1 ? 's' : ''}
             {search ? ` matching "${search}"` : ''}
-            {selectedJobIds.size > 0 ? ` · ${selectedJobIds.size} selected for supplier export` : ''}
+            {selectedJobIds.size > 0 ? ` · ${selectedJobIds.size} selected` : ''}
           </p>
         )}
 
@@ -398,6 +534,23 @@ export default function HomePage() {
         <SupplierExportModal
           selectedIds={Array.from(selectedJobIds)}
           onClose={() => setShowSupplierModal(false)}
+        />
+      )}
+
+      {/* Repeat Order Modal */}
+      {repeatOrderJob && (
+        <RepeatOrderModal
+          job={repeatOrderJob}
+          onSave={handleRepeatOrderSave}
+          onClose={() => setRepeatOrderJob(null)}
+        />
+      )}
+
+      {/* Job Details Drawer */}
+      {detailsJob && (
+        <JobDetailsDrawer
+          job={detailsJob}
+          onClose={() => setDetailsJob(null)}
         />
       )}
 

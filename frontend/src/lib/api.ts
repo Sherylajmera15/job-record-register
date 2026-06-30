@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Job, JobCreate, DualDashboardStats, ExportRange, SortOption, PartialEntry, PartialEntryCreate } from '@/types';
+import { Job, JobCreate, DualDashboardStats, ExportRange, SortOption, PartialEntry, PartialEntryCreate, RepeatOrder, RepeatOrderCreate } from '@/types';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -26,6 +26,11 @@ export const jobsApi = {
 
   companies: () => http.get<string[]>('/api/jobs/companies'),
 
+  togglePaperPlanned: (id: number) => http.patch<Job>(`/api/jobs/${id}/paper-planned`),
+
+  bulkPaperPlanned: (jobIds: number[], planned: boolean) =>
+    http.post<Job[]>('/api/jobs/bulk/paper-planned', { job_ids: jobIds, planned }),
+
   excelUrl: (search?: string, range?: ExportRange) =>
     `${BASE}/api/jobs/export/excel${exportQuery(search, range)}`,
 
@@ -41,6 +46,14 @@ export const jobsApi = {
 
 export const gsmApi = {
   values: () => http.get<number[]>('/api/jobs/gsm-values'),
+};
+
+export const repeatOrderApi = {
+  list: (jobId: number) =>
+    http.get<RepeatOrder[]>(`/api/jobs/${jobId}/repeat-orders`),
+
+  create: (jobId: number, data: RepeatOrderCreate) =>
+    http.post<RepeatOrder>(`/api/jobs/${jobId}/repeat-orders`, data),
 };
 
 export const partialApi = {

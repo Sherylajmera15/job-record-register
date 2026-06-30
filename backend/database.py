@@ -131,5 +131,21 @@ def init_db() -> None:
 
     cur.execute("ALTER TABLE partial_entries ADD COLUMN IF NOT EXISTS remarks TEXT DEFAULT ''")
 
+    # ── Paper Planned flag ────────────────────────────────────────────────────
+    cur.execute(
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS paper_planned BOOLEAN DEFAULT FALSE"
+    )
+
+    # ── Repeat Orders ─────────────────────────────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS repeat_orders (
+            id             SERIAL PRIMARY KEY,
+            job_id         INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+            order_quantity INTEGER NOT NULL,
+            remarks        TEXT    DEFAULT '',
+            created_at     TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+
     conn.commit()
     conn.close()

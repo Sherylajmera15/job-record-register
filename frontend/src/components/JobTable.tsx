@@ -9,6 +9,9 @@ interface Props {
   onSortChange: (s: SortOption) => void;
   onEdit: (job: Job) => void;
   onDelete: (job: Job) => void;
+  onRepeatOrder: (job: Job) => void;
+  onTogglePaperPlanned: (job: Job) => void;
+  onViewDetails: (job: Job) => void;
   selectedIds?: Set<number>;
   onToggleSelect?: (id: number) => void;
   onToggleSelectAll?: () => void;
@@ -37,12 +40,17 @@ function formatDate(dt: string) {
 function formatBox(job: Job): string {
   const parts: string[] = [];
   if (job.length != null) parts.push(String(job.length));
-  if (job.width != null) parts.push(String(job.width));
+  if (job.width  != null) parts.push(String(job.width));
   if (job.height != null) parts.push(String(job.height));
   return parts.length > 0 ? parts.join('×') : '—';
 }
 
-export default function JobTable({ jobs, loading, sortBy, onSortChange, onEdit, onDelete, selectedIds, onToggleSelect, onToggleSelectAll }: Props) {
+export default function JobTable({
+  jobs, loading, sortBy, onSortChange,
+  onEdit, onDelete, onRepeatOrder, onTogglePaperPlanned, onViewDetails,
+  selectedIds, onToggleSelect, onToggleSelectAll,
+}: Props) {
+
   const toggleSort = (key?: SortOption) => {
     if (!key) return;
     if (key === 'newest') {
@@ -58,7 +66,7 @@ export default function JobTable({ jobs, loading, sortBy, onSortChange, onEdit, 
 
   const sortIndicator = (key?: SortOption): string => {
     if (!key) return '';
-    const up = ['customer_az', 'job_az', 'oldest', 'order_qty', 'sheets', 'kg'];
+    const up   = ['customer_az', 'job_az', 'oldest', 'order_qty', 'sheets', 'kg'];
     const down = ['customer_za', 'job_za', 'newest'];
     if (sortBy === key || (key === 'newest' && sortBy === 'oldest')) {
       if (down.includes(sortBy) || sortBy === 'newest') return ' ↓';
@@ -114,9 +122,7 @@ export default function JobTable({ jobs, loading, sortBy, onSortChange, onEdit, 
               <th
                 key={label}
                 onClick={() => toggleSort(key)}
-                className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap ${
-                  key ? 'cursor-pointer select-none' : ''
-                }`}
+                className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap ${key ? 'cursor-pointer select-none' : ''}`}
                 style={key ? { transition: 'color 0.15s' } : {}}
                 onMouseEnter={e => { if (key) (e.target as HTMLElement).style.color = '#e040fb'; }}
                 onMouseLeave={e => { if (key) (e.target as HTMLElement).style.color = '#00ccf0'; }}
@@ -127,136 +133,210 @@ export default function JobTable({ jobs, loading, sortBy, onSortChange, onEdit, 
           </tr>
         </thead>
         <tbody>
-          {jobs.map((job, i) => (
-            <tr
-              key={job.id}
-              style={{
-                background: selectedIds?.has(job.id) ? 'rgba(0,204,240,0.06)' : (i % 2 === 0 ? '#0d1228' : '#0a0f20'),
-                borderBottom: '1px solid #1e2d50',
-                transition: 'background 0.1s',
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#141c35'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = selectedIds?.has(job.id) ? 'rgba(0,204,240,0.06)' : (i % 2 === 0 ? '#0d1228' : '#0a0f20'); }}
-            >
-              {/* Checkbox */}
-              {onToggleSelect && (
-                <td className="px-3 py-3 text-center">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds?.has(job.id) ?? false}
-                    onChange={() => onToggleSelect(job.id)}
-                    className="cursor-pointer"
-                    style={{ accentColor: '#00ccf0', width: 14, height: 14 }}
-                  />
+          {jobs.map((job, i) => {
+            const planned    = job.paper_planned;
+            const hasRepeats = job.repeat_order_count > 0;
+            const totalQty   = job.order_quantity + job.repeat_total_qty;
+
+            const rowBg = planned
+              ? 'rgba(52,211,153,0.05)'
+              : selectedIds?.has(job.id)
+                ? 'rgba(0,204,240,0.06)'
+                : i % 2 === 0 ? '#0d1228' : '#0a0f20';
+
+            const hoverBg = planned ? 'rgba(52,211,153,0.10)' : '#141c35';
+
+            return (
+              <tr
+                key={job.id}
+                style={{
+                  background: rowBg,
+                  borderBottom: planned ? '1px solid rgba(52,211,153,0.15)' : '1px solid #1e2d50',
+                  transition: 'background 0.1s',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = hoverBg; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = rowBg; }}
+              >
+                {/* Checkbox */}
+                {onToggleSelect && (
+                  <td className="px-3 py-3 text-center">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds?.has(job.id) ?? false}
+                      onChange={() => onToggleSelect(job.id)}
+                      className="cursor-pointer"
+                      style={{ accentColor: '#00ccf0', width: 14, height: 14 }}
+                    />
+                  </td>
+                )}
+
+                {/* Date */}
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="text-xs font-medium" style={{ color: '#e2e8f0' }}>{formatDate(job.created_at)}</div>
+                  <div className="text-[10px] mt-0.5" style={{ color: '#3d5070' }}>
+                    {job.created_at !== job.updated_at ? `Edited ${formatDate(job.updated_at)}` : 'Not edited'}
+                  </div>
                 </td>
-              )}
-              {/* Date */}
-              <td className="px-4 py-3 whitespace-nowrap">
-                <div className="text-xs font-medium" style={{ color: '#e2e8f0' }}>{formatDate(job.created_at)}</div>
-                <div className="text-[10px] mt-0.5" style={{ color: '#3d5070' }}>
-                  {job.created_at !== job.updated_at ? `Edited ${formatDate(job.updated_at)}` : 'Not edited'}
-                </div>
-              </td>
-              {/* Customer */}
-              <td className="px-4 py-3">
-                <div className="font-semibold max-w-[160px] truncate text-white" title={job.customer_name}>
-                  {job.customer_name}
-                </div>
-              </td>
-              {/* Job Name */}
-              <td className="px-4 py-3">
-                <div className="max-w-[160px] truncate" style={{ color: '#94a3b8' }} title={job.job_name}>
-                  {job.job_name}
-                </div>
-              </td>
-              {/* Artworks */}
-              <td className="px-4 py-3">
-                <div
-                  className="max-w-[140px] truncate text-xs"
-                  style={{ color: '#00ccf0' }}
-                  title={job.artworks || '—'}
-                >
-                  {job.artworks || <span style={{ color: '#3d5070' }}>—</span>}
-                </div>
-              </td>
-              {/* Box Size */}
-              <td className="px-4 py-3 whitespace-nowrap">
-                <span
-                  className="px-2 py-0.5 rounded text-xs font-mono"
-                  style={{ background: '#141c35', color: '#94a3b8', border: '1px solid #1e2d50' }}
-                >
-                  {formatBox(job)}
-                </span>
-              </td>
-              {/* GSM */}
-              <td className="px-4 py-3 whitespace-nowrap">
-                <span
-                  className="px-2 py-0.5 rounded text-xs font-bold"
-                  style={{ background: 'rgba(224,64,251,0.12)', color: '#e040fb', border: '1px solid rgba(224,64,251,0.25)' }}
-                >
-                  {job.gsm}
-                </span>
-              </td>
-              {/* Quality */}
-              <td className="px-4 py-3 whitespace-nowrap text-xs" style={{ color: '#94a3b8' }}>{job.paper_quality}</td>
-              {/* Order Qty */}
-              <td className="px-4 py-3 whitespace-nowrap font-semibold text-white">
-                {job.order_quantity.toLocaleString('en-IN')}
-              </td>
-              {/* Sheet Size */}
-              <td className="px-4 py-3 whitespace-nowrap">
-                <span
-                  className="px-2 py-0.5 rounded text-xs font-mono"
-                  style={{ background: '#141c35', color: '#94a3b8', border: '1px solid #1e2d50' }}
-                >
-                  {job.sheet_length}×{job.sheet_width}
-                </span>
-              </td>
-              {/* UPS */}
-              <td className="px-4 py-3 whitespace-nowrap text-center">
-                <span style={{ color: '#94a3b8' }}>{job.ups}</span>
-              </td>
-              {/* Final Sheets */}
-              <td className="px-4 py-3 whitespace-nowrap">
-                <span className="font-bold" style={{ color: '#00ccf0' }}>{job.final_sheets.toLocaleString('en-IN')}</span>
-                <span className="text-[10px] ml-1" style={{ color: '#3d5070' }}>({job.wastage_percentage}%)</span>
-              </td>
-              {/* Total KG */}
-              <td className="px-4 py-3 whitespace-nowrap">
-                <span className="font-bold" style={{ color: '#34d399' }}>{job.total_kg.toLocaleString('en-IN')}</span>
-                <span className="text-xs ml-0.5" style={{ color: '#3d5070' }}>kg</span>
-              </td>
-              {/* Actions */}
-              <td className="px-4 py-3 whitespace-nowrap">
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => onEdit(job)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors"
-                    style={{ background: 'rgba(251,191,36,0.1)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.25)' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(251,191,36,0.2)'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(251,191,36,0.1)'; }}
+
+                {/* Customer */}
+                <td className="px-4 py-3">
+                  {planned && (
+                    <div
+                      className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded mb-1"
+                      style={{ background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.35)' }}
+                    >
+                      ✓ Paper Planned
+                    </div>
+                  )}
+                  <div className="font-semibold max-w-[160px] truncate text-white" title={job.customer_name}>
+                    {job.customer_name}
+                  </div>
+                </td>
+
+                {/* Job Name */}
+                <td className="px-4 py-3">
+                  <div
+                    className="max-w-[160px] truncate cursor-pointer hover:underline"
+                    style={{ color: '#94a3b8' }}
+                    title={`${job.job_name} — click to view details`}
+                    onClick={() => onViewDetails(job)}
                   >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => onDelete(job)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors"
-                    style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.25)' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(248,113,113,0.2)'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(248,113,113,0.1)'; }}
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                    Delete
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
+                    {job.job_name}
+                  </div>
+                  {hasRepeats && (
+                    <div className="text-[10px] mt-0.5 font-semibold" style={{ color: '#e040fb' }}>
+                      +{job.repeat_order_count} repeat{job.repeat_order_count > 1 ? 's' : ''}
+                    </div>
+                  )}
+                </td>
+
+                {/* Artworks */}
+                <td className="px-4 py-3">
+                  <div className="max-w-[140px] truncate text-xs" style={{ color: '#00ccf0' }} title={job.artworks || '—'}>
+                    {job.artworks || <span style={{ color: '#3d5070' }}>—</span>}
+                  </div>
+                </td>
+
+                {/* Box Size */}
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <span className="px-2 py-0.5 rounded text-xs font-mono" style={{ background: '#141c35', color: '#94a3b8', border: '1px solid #1e2d50' }}>
+                    {formatBox(job)}
+                  </span>
+                </td>
+
+                {/* GSM */}
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <span className="px-2 py-0.5 rounded text-xs font-bold" style={{ background: 'rgba(224,64,251,0.12)', color: '#e040fb', border: '1px solid rgba(224,64,251,0.25)' }}>
+                    {job.gsm}
+                  </span>
+                </td>
+
+                {/* Quality */}
+                <td className="px-4 py-3 whitespace-nowrap text-xs" style={{ color: '#94a3b8' }}>{job.paper_quality}</td>
+
+                {/* Order Qty */}
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="font-semibold text-white">{job.order_quantity.toLocaleString('en-IN')}</div>
+                  {hasRepeats && (
+                    <div className="text-[10px] font-bold mt-0.5" style={{ color: '#34d399' }}>
+                      Total: {totalQty.toLocaleString('en-IN')}
+                    </div>
+                  )}
+                </td>
+
+                {/* Sheet Size */}
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <span className="px-2 py-0.5 rounded text-xs font-mono" style={{ background: '#141c35', color: '#94a3b8', border: '1px solid #1e2d50' }}>
+                    {job.sheet_length}×{job.sheet_width}
+                  </span>
+                </td>
+
+                {/* UPS */}
+                <td className="px-4 py-3 whitespace-nowrap text-center">
+                  <span style={{ color: '#94a3b8' }}>{job.ups}</span>
+                </td>
+
+                {/* Final Sheets */}
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <span className="font-bold" style={{ color: '#00ccf0' }}>{job.final_sheets.toLocaleString('en-IN')}</span>
+                  <span className="text-[10px] ml-1" style={{ color: '#3d5070' }}>({job.wastage_percentage}%)</span>
+                </td>
+
+                {/* Total KG */}
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <span className="font-bold" style={{ color: '#34d399' }}>{job.total_kg.toLocaleString('en-IN')}</span>
+                  <span className="text-xs ml-0.5" style={{ color: '#3d5070' }}>kg</span>
+                </td>
+
+                {/* Actions */}
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="flex flex-col gap-1">
+                    {/* Row 1: Edit + Delete */}
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => onEdit(job)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-colors"
+                        style={{ background: 'rgba(251,191,36,0.1)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.25)' }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(251,191,36,0.2)'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(251,191,36,0.1)'; }}
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => onDelete(job)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-colors"
+                        style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.25)' }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(248,113,113,0.2)'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(248,113,113,0.1)'; }}
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        Delete
+                      </button>
+                    </div>
+                    {/* Row 2: Repeat Order + Paper Planned */}
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => onRepeatOrder(job)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-colors"
+                        style={{ background: 'rgba(0,204,240,0.1)', color: '#00ccf0', border: '1px solid rgba(0,204,240,0.25)' }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(0,204,240,0.2)'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(0,204,240,0.1)'; }}
+                        title="Add a repeat order with the same job details"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Repeat
+                      </button>
+                      <button
+                        onClick={() => onTogglePaperPlanned(job)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-colors"
+                        style={
+                          planned
+                            ? { background: 'rgba(52,211,153,0.2)', color: '#34d399', border: '1px solid rgba(52,211,153,0.4)' }
+                            : { background: 'rgba(52,211,153,0.05)', color: '#6ee7b7', border: '1px solid rgba(52,211,153,0.2)' }
+                        }
+                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(52,211,153,0.25)'; }}
+                        onMouseLeave={e => {
+                          (e.currentTarget as HTMLElement).style.background = planned
+                            ? 'rgba(52,211,153,0.2)'
+                            : 'rgba(52,211,153,0.05)';
+                        }}
+                        title={planned ? 'Remove Paper Planned status' : 'Mark as Paper Planned'}
+                      >
+                        {planned ? '✓ Planned' : 'Paper Plan'}
+                      </button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

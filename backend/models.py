@@ -59,6 +59,9 @@ class JobResponse(BaseModel):
     artworks: str = ""
     printing_type: str = "outer"
     remarks: str = ""
+    paper_planned: bool = False
+    repeat_order_count: int = 0
+    repeat_total_qty: int = 0
 
 
 class DashboardStats(BaseModel):
@@ -129,3 +132,21 @@ class PartialEntryResponse(BaseModel):
     notes: Optional[str] = ""
     created_at: datetime
     updated_at: datetime
+
+
+class RepeatOrderCreate(BaseModel):
+    order_quantity: int = Field(..., gt=0)
+    remarks: str = ""
+
+
+class RepeatOrderResponse(BaseModel):
+    id: int
+    job_id: int
+    order_quantity: int
+    remarks: str = ""
+    created_at: datetime
+
+
+class BulkPaperPlannedRequest(BaseModel):
+    job_ids: list[int]
+    planned: bool

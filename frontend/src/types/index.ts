@@ -20,6 +20,9 @@ export interface Job {
   total_kg: number;
   created_at: string;
   updated_at: string;
+  paper_planned: boolean;
+  repeat_order_count: number;
+  repeat_total_qty: number;
 }
 
 export interface JobCreate {
@@ -74,6 +77,19 @@ export type ExportRangeOption = 'today' | 'this_week' | 'this_month' | 'all_time
 export interface ExportRange {
   from?: string;
   to?: string;
+}
+
+export interface RepeatOrder {
+  id: number;
+  job_id: number;
+  order_quantity: number;
+  remarks: string;
+  created_at: string;
+}
+
+export interface RepeatOrderCreate {
+  order_quantity: number;
+  remarks?: string;
 }
 
 export interface PartialEntry {
