@@ -538,13 +538,14 @@ def export_selected_pdf(ids: str = Query(...)):
     )
 
 
-# ── Supplier export builders (with order history) ─────────────────────────────
+# ── Supplier export builders ──────────────────────────────────────────────────
+# Columns: # | Paper Quality | GSM | Sheet L | Sheet W | Final Sheets | Total KG
+# No customer name, job name, artworks, order quantity, date, UPS, box size, remarks.
+# For jobs with repeat orders: merged history rows (date · qty) then green TOTAL row
+# with Final Sheets + Total KG recalculated from the combined total quantity.
 
 def _build_supplier_excel(rows: list[dict]) -> io.BytesIO:
-    """
-    rows must have a 'repeat_orders' list on each job dict
-    (from _fetch_jobs_by_ids_with_repeats).
-    """
+    """rows must include a 'repeat_orders' list (from _fetch_jobs_by_ids_with_repeats)."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Supplier Sheet"
@@ -566,12 +567,13 @@ def _build_supplier_excel(rows: list[dict]) -> io.BytesIO:
         except Exception:
             logo_row_offset = 0
 
-    title_row  = logo_row_offset + 1
-    sub_row    = logo_row_offset + 2
-    hdr_row    = logo_row_offset + 3
-    data_start = hdr_row + 1
+    NCOLS     = 7
+    last_col  = get_column_letter(NCOLS)
+    title_row = logo_row_offset + 1
+    sub_row   = logo_row_offset + 2
+    hdr_row   = logo_row_offset + 3
+    ri        = hdr_row + 1
 
-    last_col = get_column_letter(10)
     ws.merge_cells(f"A{title_row}:{last_col}{title_row}")
     tc           = ws.cell(row=title_row, column=1)
     tc.value     = "Shri Neminath Printers & Packaging — Supplier Paper Requirement Sheet"
@@ -582,17 +584,13 @@ def _build_supplier_excel(rows: list[dict]) -> io.BytesIO:
 
     ws.merge_cells(f"A{sub_row}:{last_col}{sub_row}")
     sc           = ws.cell(row=sub_row, column=1)
-    sc.value     = f"Generated: {datetime.now().strftime('%d/%m/%Y %H:%M')}  |  Jobs: {len(rows)}"
+    sc.value     = f"Generated: {datetime.now().strftime('%d/%m/%Y %H:%M')}  |  Items: {len(rows)}"
     sc.font      = Font(size=9, color="94A3B8")
     sc.fill      = PatternFill("solid", fgColor="0F172A")
     sc.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[sub_row].height = 18
 
-    headers = [
-        "#", "Customer / Job", "Paper Quality", "GSM",
-        "Sheet L (cm)", "Sheet W (cm)",
-        "Order Date", "Order Qty", "Final Sheets", "Total KG",
-    ]
+    headers   = ["#", "Paper Quality", "GSM", "Sheet L (cm)", "Sheet W (cm)", "Final Sheets", "Total KG"]
     hdr_font  = Font(bold=True, color="FFFFFF", size=10)
     hdr_fill  = PatternFill("solid", fgColor="1E40AF")
     hdr_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -604,72 +602,69 @@ def _build_supplier_excel(rows: list[dict]) -> io.BytesIO:
         c.border    = border
     ws.row_dimensions[hdr_row].height = 32
 
-    alt_fill   = PatternFill("solid", fgColor="EFF6FF")
-    total_fill = PatternFill("solid", fgColor="D1FAE5")   # light green for totals
-    repeat_fill = PatternFill("solid", fgColor="F0FDF4")  # very light green for repeat rows
+    alt_fill    = PatternFill("solid", fgColor="EFF6FF")
+    total_fill  = PatternFill("solid", fgColor="D1FAE5")
+    repeat_fill = PatternFill("solid", fgColor="F0FDF4")
 
-    ri = data_start
     for job_idx, job in enumerate(rows):
         repeat_orders = job.get("repeat_orders", [])
         has_repeats   = len(repeat_orders) > 0
         base_fill     = alt_fill if job_idx % 2 == 0 else None
 
-        # ── Original order row ───────────────────────────────────────────────
-        orig_date = job["created_at"].strftime("%d %b %Y") if job.get("created_at") else ""
-        vals = [
-            job_idx + 1,
-            f"{job['customer_name']} / {job['job_name']}",
-            job["paper_quality"],
-            job["gsm"],
-            job["sheet_length"],
-            job["sheet_width"],
-            orig_date,
-            job["order_quantity"],
-            job["final_sheets"],
-            job["total_kg"],
-        ]
-        for col, v in enumerate(vals, 1):
-            c           = ws.cell(row=ri, column=col, value=v)
-            c.alignment = Alignment(horizontal="center", vertical="center")
-            c.border    = border
-            if base_fill:
-                c.fill = base_fill
-        ws.row_dimensions[ri].height = 20
-        ri += 1
-
-        # ── Repeat order rows ────────────────────────────────────────────────
-        for rep in repeat_orders:
-            calc = calculate_job(
-                order_quantity=rep["order_quantity"],
-                ups=job["ups"],
-                sheet_length=job["sheet_length"],
-                sheet_width=job["sheet_width"],
-                gsm=job["gsm"],
-            )
-            rep_date = rep["created_at"].strftime("%d %b %Y") if rep.get("created_at") else ""
-            rep_vals = [
-                "",
-                "  ↳ Repeat Order",
-                "", "", "", "",
-                rep_date,
-                rep["order_quantity"],
-                calc["final_sheets"],
-                calc["total_kg"],
-            ]
-            for col, v in enumerate(rep_vals, 1):
+        if not has_repeats:
+            for col, v in enumerate(
+                [job_idx + 1, job["paper_quality"], job["gsm"],
+                 job["sheet_length"], job["sheet_width"],
+                 job["final_sheets"], job["total_kg"]], 1,
+            ):
                 c           = ws.cell(row=ri, column=col, value=v)
                 c.alignment = Alignment(horizontal="center", vertical="center")
                 c.border    = border
-                c.fill      = repeat_fill
-                if col == 2:
-                    c.font  = Font(italic=True, color="166534", size=9)
-                    c.alignment = Alignment(horizontal="left", vertical="center")
-            ws.row_dimensions[ri].height = 18
+                if base_fill:
+                    c.fill = base_fill
+            ws.row_dimensions[ri].height = 20
+            ri += 1
+        else:
+            # Paper-spec row (sheets/KG blank — recalculated from total below)
+            for col, v in enumerate(
+                [job_idx + 1, job["paper_quality"], job["gsm"],
+                 job["sheet_length"], job["sheet_width"], "", ""], 1,
+            ):
+                c           = ws.cell(row=ri, column=col, value=v)
+                c.alignment = Alignment(horizontal="center", vertical="center")
+                c.border    = border
+                if base_fill:
+                    c.fill = base_fill
+            ws.row_dimensions[ri].height = 20
             ri += 1
 
-        # ── TOTAL row (only when there are repeats) ──────────────────────────
-        if has_repeats:
-            total_qty = job["order_quantity"] + sum(r["order_quantity"] for r in repeat_orders)
+            # Order history rows (original + each repeat), merged across cols 1-5
+            all_orders = [
+                (job["created_at"].strftime("%d %b") if job.get("created_at") else "",
+                 job["order_quantity"])
+            ] + [
+                (rep["created_at"].strftime("%d %b") if rep.get("created_at") else "",
+                 rep["order_quantity"])
+                for rep in repeat_orders
+            ]
+            for (d, q) in all_orders:
+                ws.merge_cells(start_row=ri, start_column=1, end_row=ri, end_column=5)
+                c           = ws.cell(row=ri, column=1, value=f"  {d}  ·  {q:,} units")
+                c.font      = Font(size=9, color="475569")
+                c.alignment = Alignment(horizontal="left", vertical="center")
+                c.fill      = repeat_fill
+                c.border    = border
+                for col in range(2, 6):
+                    ws.cell(row=ri, column=col).border = border
+                    ws.cell(row=ri, column=col).fill   = repeat_fill
+                for col in (6, 7):
+                    ws.cell(row=ri, column=col).border = border
+                    ws.cell(row=ri, column=col).fill   = repeat_fill
+                ws.row_dimensions[ri].height = 16
+                ri += 1
+
+            # TOTAL row (green, bold, merged cols 1-5)
+            total_qty  = job["order_quantity"] + sum(r["order_quantity"] for r in repeat_orders)
             total_calc = calculate_job(
                 order_quantity=total_qty,
                 ups=job["ups"],
@@ -677,26 +672,26 @@ def _build_supplier_excel(rows: list[dict]) -> io.BytesIO:
                 sheet_width=job["sheet_width"],
                 gsm=job["gsm"],
             )
-            total_vals = [
-                "", "TOTAL", "", "", "", "",
-                "",
-                total_qty,
-                total_calc["final_sheets"],
-                total_calc["total_kg"],
-            ]
-            for col, v in enumerate(total_vals, 1):
+            ws.merge_cells(start_row=ri, start_column=1, end_row=ri, end_column=5)
+            tc           = ws.cell(row=ri, column=1,
+                                   value=f"  TOTAL ORDER QUANTITY  ·  {total_qty:,} units")
+            tc.font      = Font(bold=True, size=10, color="166534")
+            tc.alignment = Alignment(horizontal="left", vertical="center")
+            tc.fill      = total_fill
+            tc.border    = border
+            for col in range(2, 6):
+                ws.cell(row=ri, column=col).border = border
+                ws.cell(row=ri, column=col).fill   = total_fill
+            for col, v in [(6, total_calc["final_sheets"]), (7, total_calc["total_kg"])]:
                 c           = ws.cell(row=ri, column=col, value=v)
+                c.font      = Font(bold=True, size=10, color="166534")
                 c.alignment = Alignment(horizontal="center", vertical="center")
                 c.border    = border
                 c.fill      = total_fill
-                c.font      = Font(bold=True, color="166534", size=10)
-                if col == 2:
-                    c.alignment = Alignment(horizontal="center", vertical="center")
             ws.row_dimensions[ri].height = 22
             ri += 1
 
-    col_widths = [5, 32, 18, 8, 13, 13, 14, 12, 13, 11]
-    for ci, w in enumerate(col_widths, 1):
+    for ci, w in enumerate([5, 22, 8, 13, 13, 14, 12], 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
 
     out = io.BytesIO()
@@ -706,15 +701,13 @@ def _build_supplier_excel(rows: list[dict]) -> io.BytesIO:
 
 
 def _build_supplier_pdf(rows: list[dict]) -> io.BytesIO:
-    """
-    rows must have a 'repeat_orders' list on each job dict.
-    """
+    """rows must include a 'repeat_orders' list (from _fetch_jobs_by_ids_with_repeats)."""
     out = io.BytesIO()
     doc = SimpleDocTemplate(
         out,
-        pagesize=landscape(A4),
-        rightMargin=0.8 * cm, leftMargin=0.8 * cm,
-        topMargin=1.5 * cm, bottomMargin=1 * cm,
+        pagesize=A4,                            # portrait — only 7 narrow columns
+        rightMargin=1.2 * cm, leftMargin=1.2 * cm,
+        topMargin=1.5 * cm,  bottomMargin=1 * cm,
     )
     styles      = getSampleStyleSheet()
     title_style = ParagraphStyle(
@@ -734,7 +727,7 @@ def _build_supplier_pdf(rows: list[dict]) -> io.BytesIO:
     sub_para   = Paragraph(
         f"Supplier Paper Requirement Sheet &nbsp;|&nbsp; "
         f"Generated: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-        f" &nbsp;|&nbsp; Jobs: {len(rows)}",
+        f" &nbsp;|&nbsp; Items: {len(rows)}",
         sub_style,
     )
 
@@ -742,69 +735,73 @@ def _build_supplier_pdf(rows: list[dict]) -> io.BytesIO:
         try:
             logo_img = RLImage(io.BytesIO(logo_bytes))
             logo_img._restrictSize(2.5 * cm, 1.8 * cm)
-            header_data = [[logo_img, [title_para, sub_para]]]
-            header_tbl  = Table(header_data, colWidths=[3 * cm, None])
-            header_tbl.setStyle(TableStyle([
+            hdr_tbl = Table([[logo_img, [title_para, sub_para]]], colWidths=[3 * cm, None])
+            hdr_tbl.setStyle(TableStyle([
                 ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING",  (0, 0), (0, 0),  0),
-                ("RIGHTPADDING", (0, 0), (0, 0),  8),
-                ("LEFTPADDING",  (1, 0), (1, 0),  8),
+                ("LEFTPADDING",  (0, 0), (0, 0),   0),
+                ("RIGHTPADDING", (0, 0), (0, 0),   8),
+                ("LEFTPADDING",  (1, 0), (1, 0),   8),
             ]))
-            elements.append(header_tbl)
+            elements.append(hdr_tbl)
         except Exception:
             elements += [title_para, sub_para]
     else:
         elements += [title_para, sub_para]
 
-    tbl_data = [[
-        "#", "Customer / Job", "Paper Quality", "GSM",
-        "Sheet L", "Sheet W", "Order Date", "Order Qty", "Sheets", "KG",
-    ]]
+    # 7 columns: #, Paper Quality, GSM, Sheet L, Sheet W, Final Sheets, Total KG
+    COL_HEADERS = ["#", "Paper Quality", "GSM", "Sheet L (cm)", "Sheet W (cm)", "Final Sheets", "Total KG"]
+    tbl_data: list[list] = [COL_HEADERS]
 
-    green_rows: list[int] = []   # 0-based data rows that are TOTAL rows
+    span_rows:  list[int] = []
+    total_rows: list[int] = []
+    hist_rows:  list[int] = []
+    row_idx = 1
 
-    data_row_idx = 1
     for job_idx, job in enumerate(rows):
         repeat_orders = job.get("repeat_orders", [])
         has_repeats   = len(repeat_orders) > 0
 
-        orig_date = job["created_at"].strftime("%d %b %y") if job.get("created_at") else ""
-        tbl_data.append([
-            str(job_idx + 1),
-            f"{job['customer_name']} / {job['job_name']}",
-            job["paper_quality"],
-            str(job["gsm"]),
-            str(job["sheet_length"]),
-            str(job["sheet_width"]),
-            orig_date,
-            str(job["order_quantity"]),
-            str(job["final_sheets"]),
-            str(job["total_kg"]),
-        ])
-        data_row_idx += 1
-
-        for rep in repeat_orders:
-            calc = calculate_job(
-                order_quantity=rep["order_quantity"],
-                ups=job["ups"],
-                sheet_length=job["sheet_length"],
-                sheet_width=job["sheet_width"],
-                gsm=job["gsm"],
-            )
-            rep_date = rep["created_at"].strftime("%d %b %y") if rep.get("created_at") else ""
+        if not has_repeats:
             tbl_data.append([
-                "",
-                "  ↳ Repeat Order",
-                "", "", "", "",
-                rep_date,
-                str(rep["order_quantity"]),
-                str(calc["final_sheets"]),
-                str(calc["total_kg"]),
+                str(job_idx + 1),
+                job["paper_quality"],
+                str(job["gsm"]),
+                str(job["sheet_length"]),
+                str(job["sheet_width"]),
+                str(job["final_sheets"]),
+                str(job["total_kg"]),
             ])
-            data_row_idx += 1
+            row_idx += 1
+        else:
+            # Paper-spec row (sheets/KG blank)
+            tbl_data.append([
+                str(job_idx + 1),
+                job["paper_quality"],
+                str(job["gsm"]),
+                str(job["sheet_length"]),
+                str(job["sheet_width"]),
+                "", "",
+            ])
+            row_idx += 1
 
-        if has_repeats:
-            total_qty = job["order_quantity"] + sum(r["order_quantity"] for r in repeat_orders)
+            # Order history rows (original + repeats) — merged across cols 0-4
+            all_orders = [
+                (job["created_at"].strftime("%d %b") if job.get("created_at") else "",
+                 job["order_quantity"])
+            ] + [
+                (rep["created_at"].strftime("%d %b") if rep.get("created_at") else "",
+                 rep["order_quantity"])
+                for rep in repeat_orders
+            ]
+            for (d, q) in all_orders:
+                label = f"{d}  ·  {q:,} units" if d else f"{q:,} units"
+                tbl_data.append([label, "", "", "", "", "", ""])
+                span_rows.append(row_idx)
+                hist_rows.append(row_idx)
+                row_idx += 1
+
+            # TOTAL row (merged cols 0-4, sheets in col 5, kg in col 6)
+            total_qty  = job["order_quantity"] + sum(r["order_quantity"] for r in repeat_orders)
             total_calc = calculate_job(
                 order_quantity=total_qty,
                 ups=job["ups"],
@@ -813,36 +810,44 @@ def _build_supplier_pdf(rows: list[dict]) -> io.BytesIO:
                 gsm=job["gsm"],
             )
             tbl_data.append([
-                "", "TOTAL", "", "", "", "", "",
-                str(total_qty),
+                f"TOTAL ORDER QUANTITY  ·  {total_qty:,} units",
+                "", "", "", "",
                 str(total_calc["final_sheets"]),
                 str(total_calc["total_kg"]),
             ])
-            green_rows.append(data_row_idx)
-            data_row_idx += 1
+            span_rows.append(row_idx)
+            total_rows.append(row_idx)
+            row_idx += 1
 
-    col_w = [0.8*cm, 5*cm, 3*cm, 1.2*cm, 1.8*cm, 1.8*cm, 2*cm, 2.2*cm, 2*cm, 1.8*cm]
-    tbl   = Table(tbl_data, colWidths=col_w, repeatRows=1)
+    # Portrait A4 usable width ≈ 17.6 cm
+    col_w = [1*cm, 4.5*cm, 1.5*cm, 2.2*cm, 2.2*cm, 3.1*cm, 3.1*cm]
 
-    style_cmds = [
+    tbl = Table(tbl_data, colWidths=col_w, repeatRows=1)
+
+    style_cmds: list = [
         ("BACKGROUND",     (0, 0), (-1, 0),  colors.HexColor("#1E40AF")),
         ("TEXTCOLOR",      (0, 0), (-1, 0),  colors.white),
         ("FONTNAME",       (0, 0), (-1, 0),  "Helvetica-Bold"),
-        ("FONTSIZE",       (0, 0), (-1, 0),  7),
+        ("FONTSIZE",       (0, 0), (-1, 0),  8),
         ("ALIGN",          (0, 0), (-1, -1), "CENTER"),
         ("VALIGN",         (0, 0), (-1, -1), "MIDDLE"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#EFF6FF")]),
-        ("FONTSIZE",       (0, 1), (-1, -1), 6.5),
+        ("FONTSIZE",       (0, 1), (-1, -1), 7.5),
         ("GRID",           (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
-        ("TOPPADDING",     (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING",  (0, 0), (-1, -1), 3),
+        ("TOPPADDING",     (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING",  (0, 0), (-1, -1), 4),
     ]
-    for gr in green_rows:
-        style_cmds += [
-            ("BACKGROUND", (0, gr), (-1, gr), colors.HexColor("#D1FAE5")),
-            ("FONTNAME",   (0, gr), (-1, gr), "Helvetica-Bold"),
-            ("TEXTCOLOR",  (0, gr), (-1, gr), colors.HexColor("#166534")),
-        ]
+    for r in span_rows:
+        style_cmds.append(("SPAN",  (0, r), (4, r)))
+        style_cmds.append(("ALIGN", (0, r), (0, r), "LEFT"))
+    for r in hist_rows:
+        style_cmds.append(("BACKGROUND", (0, r), (-1, r), colors.HexColor("#F0FDF4")))
+        style_cmds.append(("TEXTCOLOR",  (0, r), (-1, r), colors.HexColor("#475569")))
+        style_cmds.append(("FONTSIZE",   (0, r), (-1, r), 7))
+    for r in total_rows:
+        style_cmds.append(("BACKGROUND", (0, r), (-1, r), colors.HexColor("#D1FAE5")))
+        style_cmds.append(("FONTNAME",   (0, r), (-1, r), "Helvetica-Bold"))
+        style_cmds.append(("TEXTCOLOR",  (0, r), (-1, r), colors.HexColor("#166534")))
 
     tbl.setStyle(TableStyle(style_cmds))
     elements.append(tbl)
